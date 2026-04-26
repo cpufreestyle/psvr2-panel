@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-PS VR2 PC 控制面板 — PSVR2 Panel v2.0
+PS VR2 PC 控制面板 — PSVR2 Panel v3.0
 一键管理 PS VR2 在 PC 上的解锁功能
-集成 PSVR2Toolkit 工具链
+深度集成 PSVR2Toolkit 工具链
 作者: Michael Qiu (cpufreestyle)
 """
 
@@ -15,13 +15,15 @@ import os
 import sys
 import threading
 import time
+import urllib.request
+import urllib.error
 from pathlib import Path
 
 # ============================================================
 # 常量配置
 # ============================================================
 APP_NAME = "PSVR2 Panel"
-APP_VERSION = "2.0.0"
+APP_VERSION = "3.0.0"
 APP_AUTHOR = "Michael Qiu"
 
 # 颜色主题（索尼 PlayStation 风格）
@@ -38,6 +40,7 @@ COLORS = {
     "card_bg": "#1A237E",
     "card_border": "#283593",
     "success": "#00E676",
+    "orange": "#FF9100",
 }
 
 # PSVR2Toolkit 相关路径
@@ -58,41 +61,52 @@ VRCFT_PATHS = [
 
 # GitHub 链接
 PSVR2TOOLKIT_URL = "https://github.com/BnuuySolutions/PSVR2Toolkit"
+PSVR2TOOLKIT_API = "https://api.github.com/repos/BnuuySolutions/PSVR2Toolkit/releases/latest"
 VRCFT_MODULE_URL = "https://github.com/BnuuySolutions/PSVR2Toolkit.VRCFT"
+VRCFT_MODULE_API = "https://api.github.com/repos/BnuuySolutions/PSVR2Toolkit.VRCFT/releases/latest"
 VRCFT_DOWNLOAD_URL = "https://github.com/benaclejames/VRCFaceTracking/releases"
 
+# 驱动文件名
+DRIVER_DLL = "driver_playstation_vr2.dll"
+DRIVER_ORIG_DLL = "driver_playstation_vr2_orig.dll"
+
 
 # ============================================================
-# PS VR2 检测与工具集成
+# PSVR2Toolkit 深度集成
 # ============================================================
 class PSVR2Toolkit:
-    """PSVR2Toolkit 工具集成"""
+    """PSVR2Toolkit 工具链深度集成"""
 
     def __init__(self):
-        self.driver_path = None
+        self.driver_dir = None
         self.driver_installed = False
+        self.toolkit_active = False
         self.driver_version = "未知"
         self.steam_path = None
+        self.latest_version = None
+        self.latest_download_url = None
 
     def find_installation(self):
         """查找 PSVR2Toolkit 驱动安装位置"""
         for path in PSVR2_DRIVER_PATHS:
-            driver_dll = os.path.join(path, "driver_playstation_vr2.dll")
-            orig_dll = os.path.join(path, "driver_playstation_vr2_orig.dll")
+            driver_dll = os.path.join(path, DRIVER_DLL)
+            orig_dll = os.path.join(path, DRIVER_ORIG_DLL)
 
             if os.path.exists(driver_dll):
-                self.driver_path = path
+                self.driver_dir = path
                 self.driver_installed = True
 
-                # 检查是否有备份文件（表示已安装 toolkit）
                 if os.path.exists(orig_dll):
-                    # 比较文件大小判断是否是 toolkit 版本
                     driver_size = os.path.getsize(driver_dll)
                     orig_size = os.path.getsize(orig_dll)
-
-                    # Toolkit 版本约 410KB，原版约 3.5MB
                     if driver_size < 500000 and orig_size > 3000000:
-                        self.driver_version = "PSVR2Toolkit v0.2.1"
+                        self.toolkit_active = True
+                        self.driver_version = "PSVR2Toolkit"
+                        return True
+                    elif driver_size > 3000000 and orig_size < 500000:
+                        # 反向情况：原始驱动在使用，toolkit备份
+                        self.toolkit_active = False
+                        self.driver_version = "官方驱动 (Toolkit已备份)"
                         return True
 
                 self.driver_version = "官方驱动"
@@ -104,32 +118,133 @@ class PSVR2Toolkit:
         """获取各功能的解锁状态"""
         if not self.driver_installed:
             return {
-                "eye_tracking": "需要安装",
-                "head_vibration": "需要安装",
-                "adaptive_trigger": "需要安装",
-                "hdr": "需要安装",
-                "haptic_feedback": "需要安装",
-                "passthrough": "官方支持",
+                "eye_tracking": ("需要安装", "red"),
+                "head_vibration": ("需要安装", "red"),
+                "adaptive_trigger": ("需要安装", "red"),
+                "hdr": ("需要安装", "red"),
+                "haptic_feedback": ("需要安装", "red"),
+                "passthrough": ("官方支持", "green"),
             }
 
-        if "PSVR2Toolkit" in self.driver_version:
+        if self.toolkit_active:
             return {
-                "eye_tracking": "已解锁 ✅",
-                "head_vibration": "已解锁 ✅",
-                "adaptive_trigger": "已解锁 ✅",
-                "hdr": "已解锁 ✅",
-                "haptic_feedback": "部分可用",
-                "passthrough": "官方支持",
+                "eye_tracking": ("已解锁 ✅", "green"),
+                "head_vibration": ("已解锁 ✅", "green"),
+                "adaptive_trigger": ("已解锁 ✅", "green"),
+                "hdr": ("已解锁 ✅", "green"),
+                "haptic_feedback": ("部分可用", "yellow"),
+                "passthrough": ("官方支持", "green"),
             }
 
         return {
-            "eye_tracking": "未解锁",
-            "head_vibration": "未解锁",
-            "adaptive_trigger": "未解锁",
-            "hdr": "未解锁",
-            "haptic_feedback": "未解锁",
-            "passthrough": "官方支持",
+            "eye_tracking": ("未解锁", "red"),
+            "head_vibration": ("未解锁", "red"),
+            "adaptive_trigger": ("未解锁", "red"),
+            "hdr": ("未解锁", "red"),
+            "haptic_feedback": ("未解锁", "red"),
+            "passthrough": ("官方支持", "green"),
         }
+
+    def switch_to_toolkit(self):
+        """切换到 PSVR2Toolkit 驱动"""
+        if not self.driver_dir:
+            return False, "未找到驱动目录"
+
+        driver_path = os.path.join(self.driver_dir, DRIVER_DLL)
+        orig_path = os.path.join(self.driver_dir, DRIVER_ORIG_DLL)
+        toolkit_path = os.path.join(self.driver_dir, "driver_playstation_vr2_toolkit.dll")
+
+        if self.toolkit_active:
+            return True, "Toolkit 驱动已是当前激活状态"
+
+        # 查找 toolkit 驱动
+        # 策略1: 检查是否有 _toolkit.dll 备份
+        if os.path.exists(toolkit_path):
+            # 备份当前官方驱动
+            if os.path.exists(driver_path):
+                os.rename(driver_path, orig_path)
+            # 激活 toolkit
+            os.rename(toolkit_path, driver_path)
+            self.toolkit_active = True
+            self.driver_version = "PSVR2Toolkit"
+            return True, "已切换到 PSVR2Toolkit 驱动"
+
+        # 策略2: 如果有 orig 备份且 orig 是大文件，当前就是官方驱动
+        if os.path.exists(orig_path):
+            orig_size = os.path.getsize(orig_path)
+            if orig_size < 500000:
+                # orig 是 toolkit 备份，当前是官方驱动 → 互换
+                os.rename(driver_path, toolkit_path)  # 备份官方
+                os.rename(orig_path, driver_path)      # 恢复 toolkit
+                self.toolkit_active = True
+                self.driver_version = "PSVR2Toolkit"
+                return True, "已切换到 PSVR2Toolkit 驱动"
+
+        return False, "未找到 PSVR2Toolkit 驱动文件，请先下载安装"
+
+    def switch_to_official(self):
+        """切换回官方驱动"""
+        if not self.driver_dir:
+            return False, "未找到驱动目录"
+
+        driver_path = os.path.join(self.driver_dir, DRIVER_DLL)
+        orig_path = os.path.join(self.driver_dir, DRIVER_ORIG_DLL)
+        toolkit_path = os.path.join(self.driver_dir, "driver_playstation_vr2_toolkit.dll")
+
+        if not self.toolkit_active:
+            return True, "官方驱动已是当前激活状态"
+
+        # 备份 toolkit 驱动
+        if os.path.exists(driver_path):
+            os.rename(driver_path, toolkit_path)
+
+        # 恢复官方驱动
+        if os.path.exists(orig_path):
+            orig_size = os.path.getsize(orig_path)
+            if orig_size > 3000000:
+                os.rename(orig_path, driver_path)
+                self.toolkit_active = False
+                self.driver_version = "官方驱动"
+                return True, "已切换回官方驱动"
+            else:
+                # orig 不是官方驱动，恢复回去
+                if os.path.exists(toolkit_path):
+                    os.rename(toolkit_path, driver_path)
+                return False, "未找到官方驱动备份文件"
+
+        return False, "未找到官方驱动备份文件"
+
+    def check_update(self):
+        """检查 GitHub 上的最新版本"""
+        try:
+            req = urllib.request.Request(PSVR2TOOLKIT_API)
+            req.add_header("User-Agent", "PSVR2Panel/3.0")
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                self.latest_version = data.get("tag_name", "unknown")
+                assets = data.get("assets", [])
+                for asset in assets:
+                    if asset["name"].endswith(".dll"):
+                        self.latest_download_url = asset["browser_download_url"]
+                        break
+                return True, self.latest_version
+        except Exception as e:
+            return False, str(e)
+
+    def download_update(self, progress_callback=None):
+        """下载最新驱动"""
+        if not self.latest_download_url:
+            return False, "无下载链接"
+
+        try:
+            save_path = os.path.join(self.driver_dir, "driver_playstation_vr2_new.dll")
+            urllib.request.urlretrieve(
+                self.latest_download_url, save_path,
+                reporthook=progress_callback
+            )
+            return True, save_path
+        except Exception as e:
+            return False, str(e)
 
     def find_steam_path(self):
         """查找 Steam 安装路径"""
@@ -146,13 +261,20 @@ class PSVR2Toolkit:
         return None
 
 
+# ============================================================
+# VRCFaceTracking 深度集成
+# ============================================================
 class VRCFaceTrackingIntegration:
-    """VRCFaceTracking 集成"""
+    """VRCFaceTracking 深度集成"""
 
     def __init__(self):
         self.installed = False
         self.path = None
         self.psvr2_module_installed = False
+        self.module_path = None
+        self.is_running = False
+        self.latest_module_version = None
+        self.latest_module_url = None
 
     def find_installation(self):
         """查找 VRCFaceTracking 安装"""
@@ -162,36 +284,49 @@ class VRCFaceTrackingIntegration:
                 self.path = str(path)
                 return True
 
-        # 尝试在常见位置查找
+        # 在 AppData 中搜索
         appdata_local = Path.home() / "AppData" / "Local"
-        for folder in appdata_local.iterdir():
-            if "vrcfacetracking" in folder.name.lower():
-                exe = folder / "VRCFaceTracking.exe"
-                if exe.exists():
-                    self.installed = True
-                    self.path = str(exe)
-                    return True
-
+        if appdata_local.exists():
+            for folder in appdata_local.iterdir():
+                if "vrcfacetracking" in folder.name.lower():
+                    exe = folder / "VRCFaceTracking.exe"
+                    if exe.exists():
+                        self.installed = True
+                        self.path = str(exe)
+                        return True
         return False
 
     def check_psvr2_module(self):
         """检查 PSVR2 VRCFT 模块是否已安装"""
-        if not self.installed:
-            return False
-
-        # VRCFT 模块路径
-        module_paths = [
+        module_dirs = [
             Path.home() / "AppData" / "Roaming" / "VRCFaceTracking" / "Modules",
             Path.home() / "AppData" / "Local" / "VRCFaceTracking" / "Modules",
         ]
 
-        for modules_dir in module_paths:
+        for modules_dir in module_dirs:
             if modules_dir.exists():
-                for item in modules_dir.iterdir():
+                for item in modules_dir.rglob("*"):
                     if "psvr2" in item.name.lower():
                         self.psvr2_module_installed = True
+                        self.module_path = str(modules_dir)
                         return True
+        return False
 
+    def check_running(self):
+        """检查 VRCFaceTracking 是否正在运行"""
+        try:
+            result = subprocess.run(
+                ["powershell", "-Command",
+                 "Get-Process VRCFaceTracking -ErrorAction SilentlyContinue | "
+                 "Select-Object Id, ProcessName | ConvertTo-Json -Compress"],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                self.is_running = True
+                return True
+        except Exception:
+            pass
+        self.is_running = False
         return False
 
     def launch(self):
@@ -201,51 +336,108 @@ class VRCFaceTrackingIntegration:
             return True
         return False
 
+    def check_module_update(self):
+        """检查 VRCFT PSVR2 模块最新版本"""
+        try:
+            req = urllib.request.Request(VRCFT_MODULE_API)
+            req.add_header("User-Agent", "PSVR2Panel/3.0")
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                self.latest_module_version = data.get("tag_name", "unknown")
+                assets = data.get("assets", [])
+                for asset in assets:
+                    name = asset["name"].lower()
+                    if name.endswith(".dll") or name.endswith(".zip"):
+                        self.latest_module_url = asset["browser_download_url"]
+                        break
+                return True, self.latest_module_version
+        except Exception as e:
+            return False, str(e)
 
+
+# ============================================================
+# SteamVR 进程监控
+# ============================================================
+class SteamVRMonitor:
+    """SteamVR 进程监控"""
+
+    def __init__(self):
+        self.is_running = False
+        self.psvr2_detected = False
+
+    def check_running(self):
+        """检查 SteamVR 是否运行"""
+        try:
+            result = subprocess.run(
+                ["powershell", "-Command",
+                 "Get-Process vrserver -ErrorAction SilentlyContinue | "
+                 "Select-Object Id | ConvertTo-Json -Compress"],
+                capture_output=True, text=True, timeout=5
+            )
+            self.is_running = result.returncode == 0 and result.stdout.strip() != ""
+        except Exception:
+            self.is_running = False
+        return self.is_running
+
+    def check_psvr2_in_steamvr(self):
+        """检查 SteamVR 是否识别 PSVR2"""
+        try:
+            result = subprocess.run(
+                ["powershell", "-Command",
+                 "Get-Content \"$env:LOCALAPPDATA\\openvr\\openvrpaths.vrpath\" "
+                 "-ErrorAction SilentlyContinue"],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0 and "playstation" in result.stdout.lower():
+                self.psvr2_detected = True
+                return True
+        except Exception:
+            pass
+        self.psvr2_detected = False
+        return False
+
+
+# ============================================================
+# PS VR2 设备检测
+# ============================================================
 class PSVR2Detector:
-    """PS VR2 设备检测"""
+    """PS VR2 综合检测器"""
 
     def __init__(self):
         self.connected = False
         self.toolkit = PSVR2Toolkit()
         self.vrcft = VRCFaceTrackingIntegration()
+        self.steamvr = SteamVRMonitor()
         self.features = {
-            "eye_tracking": {"name": "👁️ 眼动追踪", "status": "检测中...", "desc": "VRChat 眼动追踪支持"},
-            "head_vibration": {"name": "📳 头显震动", "status": "检测中...", "desc": "头显震动反馈"},
-            "adaptive_trigger": {"name": "🎮 自适应扳机", "status": "检测中...", "desc": "Sense 控制器扳机阻力"},
-            "hdr": {"name": "🌈 HDR / 10-bit", "status": "检测中...", "desc": "HDR 高动态范围色彩"},
-            "haptic_feedback": {"name": "✋ 触觉反馈", "status": "检测中...", "desc": "控制器触觉反馈"},
-            "passthrough": {"name": "📷 透视视图", "status": "检测中...", "desc": "摄像头透视模式"},
+            "eye_tracking": {"name": "👁️ 眼动追踪", "status": "检测中...", "color": "gray", "desc": "VRChat 眼动追踪支持"},
+            "head_vibration": {"name": "📳 头显震动", "status": "检测中...", "color": "gray", "desc": "头显震动反馈"},
+            "adaptive_trigger": {"name": "🎮 自适应扳机", "status": "检测中...", "color": "gray", "desc": "Sense 控制器扳机阻力"},
+            "hdr": {"name": "🌈 HDR / 10-bit", "status": "检测中...", "color": "gray", "desc": "HDR 高动态范围色彩"},
+            "haptic_feedback": {"name": "✋ 触觉反馈", "status": "检测中...", "color": "gray", "desc": "控制器触觉反馈"},
+            "passthrough": {"name": "📷 透视视图", "status": "检测中...", "color": "gray", "desc": "摄像头透视模式"},
         }
 
     def detect_all(self):
         """全面检测"""
-        # 检测 PS VR2 连接
         self._detect_connection()
-
-        # 检测 PSVR2Toolkit
         self.toolkit.find_installation()
-
-        # 检测 VRCFaceTracking
         self.vrcft.find_installation()
         self.vrcft.check_psvr2_module()
-
-        # 更新功能状态
+        self.vrcft.check_running()
+        self.steamvr.check_running()
+        self.steamvr.check_psvr2_in_steamvr()
         self._update_feature_status()
-
         return self.connected
 
     def _detect_connection(self):
         """检测 PS VR2 是否连接"""
         try:
-            # 方法1: PowerShell 检查 PnP 设备
             result = subprocess.run(
                 ["powershell", "-Command",
                  "Get-PnpDevice | Where-Object { $_.FriendlyName -match 'PlayStation|PSVR|VR2' } | "
                  "Select-Object FriendlyName, Status | ConvertTo-Json -Compress"],
                 capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=10
             )
-
             if result.returncode == 0 and result.stdout.strip():
                 try:
                     devices = json.loads(result.stdout)
@@ -257,50 +449,49 @@ class PSVR2Detector:
                             return
                 except json.JSONDecodeError:
                     pass
-
-            # 方法2: 检查 SteamVR 是否识别 PS VR2
             if self.toolkit.driver_installed:
-                # 如果驱动已安装，假设可能已连接
                 self.connected = True
-
         except (subprocess.TimeoutExpired, Exception):
             pass
 
     def _update_feature_status(self):
         """更新功能状态"""
-        status = self.toolkit.get_feature_status()
-
-        for key, feat in self.features.items():
-            if key in status:
-                feat["status"] = status[key]
+        status_map = self.toolkit.get_feature_status()
+        for key, (status, color) in status_map.items():
+            if key in self.features:
+                self.features[key]["status"] = status
+                self.features[key]["color"] = color
 
 
 # ============================================================
-# GUI 主界面
+# GUI 主界面 v3.0
 # ============================================================
 class PSVR2Panel:
-    """PS VR2 控制面板主界面"""
+    """PS VR2 控制面板 v3.0 — 深度集成 PSVR2Toolkit"""
 
     def __init__(self):
         self.detector = PSVR2Detector()
         self.root = tk.Tk()
         self.root.title(f"{APP_NAME} v{APP_VERSION}")
-        self.root.geometry("560x780")
+        self.root.geometry("580x880")
         self.root.resizable(False, False)
         self.root.configure(bg=COLORS["bg_dark"])
 
         # 状态变量
         self.status_var = tk.StringVar(value="正在检测...")
         self.toolkit_status_var = tk.StringVar(value="检测中...")
+        self.vrcft_status_var = tk.StringVar(value="检测中...")
+        self.steamvr_status_var = tk.StringVar(value="检测中...")
 
         self._build_ui()
         self._run_detection()
+        self._start_monitor()
 
     def _build_ui(self):
         """构建界面"""
         # ---- 顶部标题 ----
         header = tk.Frame(self.root, bg=COLORS["bg_dark"])
-        header.pack(fill=tk.X, padx=20, pady=(15, 5))
+        header.pack(fill=tk.X, padx=20, pady=(12, 3))
 
         tk.Label(
             header, text="🎮 PS VR2 Panel",
@@ -308,30 +499,31 @@ class PSVR2Panel:
             fg=COLORS["text_white"], bg=COLORS["bg_dark"]
         ).pack(anchor="w")
 
-        tk.Label(
-            header, text="PlayStation VR2 PC 控制面板",
-            font=("Microsoft YaHei", 10),
+        version_label = tk.Label(
+            header, text=f"v{APP_VERSION} · PlayStation VR2 PC 控制面板",
+            font=("Microsoft YaHei", 9),
             fg=COLORS["text_light"], bg=COLORS["bg_dark"]
-        ).pack(anchor="w")
+        )
+        version_label.pack(anchor="w")
 
         # ---- 连接状态 ----
         conn_frame = tk.Frame(
             self.root, bg=COLORS["card_bg"],
             highlightbackground=COLORS["card_border"], highlightthickness=1
         )
-        conn_frame.pack(fill=tk.X, padx=20, pady=8)
+        conn_frame.pack(fill=tk.X, padx=20, pady=6)
 
         self.conn_indicator = tk.Label(
             conn_frame, text="●", font=("Arial", 16),
             fg=COLORS["yellow"], bg=COLORS["card_bg"]
         )
-        self.conn_indicator.pack(side=tk.LEFT, padx=(12, 5), pady=10)
+        self.conn_indicator.pack(side=tk.LEFT, padx=(12, 5), pady=8)
 
         tk.Label(
             conn_frame, textvariable=self.status_var,
             font=("Microsoft YaHei", 11),
             fg=COLORS["text_white"], bg=COLORS["card_bg"]
-        ).pack(side=tk.LEFT, pady=10)
+        ).pack(side=tk.LEFT, pady=8)
 
         tk.Button(
             conn_frame, text="🔄 刷新",
@@ -339,17 +531,24 @@ class PSVR2Panel:
             bg=COLORS["accent"], fg=COLORS["text_white"],
             relief=tk.FLAT, cursor="hand2",
             command=self._run_detection
-        ).pack(side=tk.RIGHT, padx=12, pady=10)
+        ).pack(side=tk.RIGHT, padx=12, pady=8)
 
-        # ---- PSVR2Toolkit 状态 ----
+        # ============ 驱动管理区 ============
+        tk.Label(
+            self.root, text="🔧 驱动管理",
+            font=("Microsoft YaHei", 12, "bold"),
+            fg=COLORS["text_white"], bg=COLORS["bg_dark"]
+        ).pack(anchor="w", padx=25, pady=(10, 3))
+
+        # PSVR2Toolkit 状态
         toolkit_frame = tk.Frame(
             self.root, bg=COLORS["card_bg"],
             highlightbackground=COLORS["card_border"], highlightthickness=1
         )
-        toolkit_frame.pack(fill=tk.X, padx=20, pady=4)
+        toolkit_frame.pack(fill=tk.X, padx=20, pady=2)
 
         tk.Label(
-            toolkit_frame, text="🔧 PSVR2Toolkit:",
+            toolkit_frame, text="PSVR2Toolkit:",
             font=("Microsoft YaHei", 10),
             fg=COLORS["text_light"], bg=COLORS["card_bg"]
         ).pack(side=tk.LEFT, padx=(12, 5), pady=8)
@@ -361,74 +560,181 @@ class PSVR2Panel:
         )
         self.toolkit_status_label.pack(side=tk.LEFT, pady=8)
 
+        # 驱动切换按钮
+        btn_frame = tk.Frame(toolkit_frame, bg=COLORS["card_bg"])
+        btn_frame.pack(side=tk.RIGHT, padx=12, pady=8)
+
+        self.switch_btn = tk.Button(
+            btn_frame, text="🔄 切换驱动",
+            font=("Microsoft YaHei", 8),
+            bg=COLORS["orange"], fg=COLORS["text_white"],
+            relief=tk.FLAT, cursor="hand2",
+            command=self._switch_driver
+        )
+        self.switch_btn.pack(side=tk.RIGHT, padx=(4, 0))
+
         tk.Button(
-            toolkit_frame, text="📁 打开目录",
+            btn_frame, text="📁",
+            font=("Arial", 9),
+            bg=COLORS["accent"], fg=COLORS["text_white"],
+            relief=tk.FLAT, cursor="hand2", width=3,
+            command=self._open_driver_folder
+        ).pack(side=tk.RIGHT, padx=4)
+
+        # 更新检查
+        update_frame = tk.Frame(
+            self.root, bg=COLORS["card_bg"],
+            highlightbackground=COLORS["card_border"], highlightthickness=1
+        )
+        update_frame.pack(fill=tk.X, padx=20, pady=2)
+
+        tk.Label(
+            update_frame, text="🔄 驱动更新:",
+            font=("Microsoft YaHei", 10),
+            fg=COLORS["text_light"], bg=COLORS["card_bg"]
+        ).pack(side=tk.LEFT, padx=(12, 5), pady=8)
+
+        self.update_status_label = tk.Label(
+            update_frame, text="未检查",
+            font=("Microsoft YaHei", 10),
+            fg=COLORS["text_light"], bg=COLORS["card_bg"]
+        )
+        self.update_status_label.pack(side=tk.LEFT, pady=8)
+
+        self.update_btn = tk.Button(
+            update_frame, text="🔍 检查更新",
             font=("Microsoft YaHei", 8),
             bg=COLORS["accent"], fg=COLORS["text_white"],
             relief=tk.FLAT, cursor="hand2",
-            command=self._open_driver_folder
+            command=self._check_update
+        )
+        self.update_btn.pack(side=tk.RIGHT, padx=12, pady=8)
+
+        # ============ SteamVR & VRCFT 状态 ============
+        tk.Label(
+            self.root, text="🥽 运行状态",
+            font=("Microsoft YaHei", 12, "bold"),
+            fg=COLORS["text_white"], bg=COLORS["bg_dark"]
+        ).pack(anchor="w", padx=25, pady=(10, 3))
+
+        # SteamVR 状态
+        steamvr_frame = tk.Frame(
+            self.root, bg=COLORS["card_bg"],
+            highlightbackground=COLORS["card_border"], highlightthickness=1
+        )
+        steamvr_frame.pack(fill=tk.X, padx=20, pady=2)
+
+        tk.Label(
+            steamvr_frame, text="SteamVR:",
+            font=("Microsoft YaHei", 10),
+            fg=COLORS["text_light"], bg=COLORS["card_bg"]
+        ).pack(side=tk.LEFT, padx=(12, 5), pady=8)
+
+        self.steamvr_status_label = tk.Label(
+            steamvr_frame, textvariable=self.steamvr_status_var,
+            font=("Microsoft YaHei", 10, "bold"),
+            fg=COLORS["text_white"], bg=COLORS["card_bg"]
+        )
+        self.steamvr_status_label.pack(side=tk.LEFT, pady=8)
+
+        tk.Button(
+            steamvr_frame, text="🚀 启动",
+            font=("Microsoft YaHei", 8),
+            bg=COLORS["success"], fg=COLORS["text_white"],
+            relief=tk.FLAT, cursor="hand2",
+            command=self._launch_steamvr
         ).pack(side=tk.RIGHT, padx=12, pady=8)
 
-        # ---- VRCFaceTracking 状态 ----
+        # VRCFaceTracking 状态
         vrcft_frame = tk.Frame(
             self.root, bg=COLORS["card_bg"],
             highlightbackground=COLORS["card_border"], highlightthickness=1
         )
-        vrcft_frame.pack(fill=tk.X, padx=20, pady=4)
+        vrcft_frame.pack(fill=tk.X, padx=20, pady=2)
 
         tk.Label(
-            vrcft_frame, text="👀 VRCFaceTracking:",
+            vrcft_frame, text="VRCFaceTracking:",
             font=("Microsoft YaHei", 10),
             fg=COLORS["text_light"], bg=COLORS["card_bg"]
         ).pack(side=tk.LEFT, padx=(12, 5), pady=8)
 
         self.vrcft_status_label = tk.Label(
-            vrcft_frame, text="检测中...",
+            vrcft_frame, textvariable=self.vrcft_status_var,
             font=("Microsoft YaHei", 10, "bold"),
             fg=COLORS["text_white"], bg=COLORS["card_bg"]
         )
         self.vrcft_status_label.pack(side=tk.LEFT, pady=8)
 
-        tk.Button(
-            vrcft_frame, text="🚀 启动",
+        vrcft_btn_frame = tk.Frame(vrcft_frame, bg=COLORS["card_bg"])
+        vrcft_btn_frame.pack(side=tk.RIGHT, padx=12, pady=8)
+
+        self.vrcft_launch_btn = tk.Button(
+            vrcft_btn_frame, text="🚀 启动",
             font=("Microsoft YaHei", 8),
             bg=COLORS["success"], fg=COLORS["text_white"],
             relief=tk.FLAT, cursor="hand2",
             command=self._launch_vrcft
-        ).pack(side=tk.RIGHT, padx=(5, 12), pady=8)
+        )
+        self.vrcft_launch_btn.pack(side=tk.RIGHT, padx=(4, 0))
 
         tk.Button(
-            vrcft_frame, text="📥 下载",
+            vrcft_btn_frame, text="📥 下载",
             font=("Microsoft YaHei", 8),
             bg=COLORS["accent"], fg=COLORS["text_white"],
             relief=tk.FLAT, cursor="hand2",
             command=self._download_vrcft
-        ).pack(side=tk.RIGHT, padx=5, pady=8)
+        ).pack(side=tk.RIGHT, padx=4)
 
-        # ---- 功能状态卡片 ----
+        # ============ 功能解锁状态 ============
         tk.Label(
             self.root, text="📊 功能状态",
             font=("Microsoft YaHei", 12, "bold"),
             fg=COLORS["text_white"], bg=COLORS["bg_dark"]
-        ).pack(anchor="w", padx=25, pady=(15, 5))
+        ).pack(anchor="w", padx=25, pady=(10, 3))
 
-        self.feature_frames = {}
+        self.feature_labels = {}
         for key, feat in self.detector.features.items():
-            frame = self._create_feature_card(key, feat)
-            self.feature_frames[key] = frame
+            frame = tk.Frame(
+                self.root, bg=COLORS["card_bg"],
+                highlightbackground=COLORS["card_border"], highlightthickness=1
+            )
+            frame.pack(fill=tk.X, padx=20, pady=2)
 
-        # ---- 底部操作区 ----
+            left = tk.Frame(frame, bg=COLORS["card_bg"])
+            left.pack(side=tk.LEFT, padx=(12, 5), pady=5)
+
+            tk.Label(
+                left, text=feat["name"],
+                font=("Microsoft YaHei", 10),
+                fg=COLORS["text_white"], bg=COLORS["card_bg"]
+            ).pack(anchor="w")
+
+            tk.Label(
+                left, text=feat["desc"],
+                font=("Microsoft YaHei", 8),
+                fg=COLORS["text_light"], bg=COLORS["card_bg"]
+            ).pack(anchor="w")
+
+            status_label = tk.Label(
+                frame, text=feat["status"],
+                font=("Microsoft YaHei", 9, "bold"),
+                fg=COLORS["gray"], bg=COLORS["card_bg"]
+            )
+            status_label.pack(side=tk.RIGHT, padx=12, pady=5)
+            self.feature_labels[key] = status_label
+
+        # ============ 底部操作区 ============
         bottom = tk.Frame(self.root, bg=COLORS["bg_dark"])
-        bottom.pack(fill=tk.X, padx=20, pady=(15, 20), side=tk.BOTTOM)
+        bottom.pack(fill=tk.X, padx=20, pady=(12, 15), side=tk.BOTTOM)
 
-        # SteamVR 按钮
+        # 一键启动全部
         tk.Button(
-            bottom, text="🥽 启动 SteamVR",
+            bottom, text="🚀 一键启动全部 (SteamVR + VRCFT)",
             font=("Microsoft YaHei", 13, "bold"),
-            bg=COLORS["accent"], fg=COLORS["text_white"],
+            bg=COLORS["success"], fg=COLORS["text_white"],
             relief=tk.FLAT, cursor="hand2", height=2,
-            command=self._launch_steamvr
-        ).pack(fill=tk.X, pady=(0, 8))
+            command=self._launch_all
+        ).pack(fill=tk.X, pady=(0, 6))
 
         # 工具链按钮
         tools_frame = tk.Frame(bottom, bg=COLORS["bg_dark"])
@@ -440,7 +746,7 @@ class PSVR2Panel:
             bg=COLORS["card_bg"], fg=COLORS["text_white"],
             relief=tk.FLAT, cursor="hand2",
             command=self._open_toolkit_github
-        ).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0, 4))
+        ).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0, 3))
 
         tk.Button(
             tools_frame, text="🔌 VRCFT 模块",
@@ -448,7 +754,7 @@ class PSVR2Panel:
             bg=COLORS["card_bg"], fg=COLORS["text_white"],
             relief=tk.FLAT, cursor="hand2",
             command=self._open_vrcft_module
-        ).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=4)
+        ).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=3)
 
         tk.Button(
             tools_frame, text="ℹ️ 关于",
@@ -456,54 +762,10 @@ class PSVR2Panel:
             bg=COLORS["card_bg"], fg=COLORS["text_white"],
             relief=tk.FLAT, cursor="hand2",
             command=self._show_about
-        ).pack(side=tk.RIGHT, expand=True, fill=tk.X, padx=(4, 0))
+        ).pack(side=tk.RIGHT, expand=True, fill=tk.X, padx=(3, 0))
 
-    def _create_feature_card(self, key, feat):
-        """创建功能卡片"""
-        frame = tk.Frame(
-            self.root, bg=COLORS["card_bg"],
-            highlightbackground=COLORS["card_border"], highlightthickness=1
-        )
-        frame.pack(fill=tk.X, padx=20, pady=2)
-
-        # 左侧：图标+名称
-        left = tk.Frame(frame, bg=COLORS["card_bg"])
-        left.pack(side=tk.LEFT, padx=(12, 5), pady=6)
-
-        tk.Label(
-            left, text=feat["name"],
-            font=("Microsoft YaHei", 10),
-            fg=COLORS["text_white"], bg=COLORS["card_bg"]
-        ).pack(anchor="w")
-
-        tk.Label(
-            left, text=feat["desc"],
-            font=("Microsoft YaHei", 8),
-            fg=COLORS["text_light"], bg=COLORS["card_bg"]
-        ).pack(anchor="w")
-
-        # 右侧：状态
-        status_label = tk.Label(
-            frame, text=feat["status"],
-            font=("Microsoft YaHei", 9, "bold"),
-            fg=COLORS["text_white"], bg=COLORS["card_bg"]
-        )
-        status_label.pack(side=tk.RIGHT, padx=12, pady=6)
-
-        return {"frame": frame, "status_label": status_label}
-
-    def _status_color(self, status):
-        """状态颜色"""
-        if "已解锁" in status or "官方支持" in status:
-            return COLORS["green"]
-        elif "未解锁" in status or "需要安装" in status:
-            return COLORS["red"]
-        elif "部分" in status:
-            return COLORS["yellow"]
-        return COLORS["gray"]
-
+    # ---- 后台检测 ----
     def _run_detection(self):
-        """后台检测"""
         self.status_var.set("正在检测...")
         self.conn_indicator.config(fg=COLORS["yellow"])
 
@@ -523,93 +785,210 @@ class PSVR2Panel:
             self.status_var.set("❌ PS VR2 未检测到")
             self.conn_indicator.config(fg=COLORS["red"])
 
-        # PSVR2Toolkit 状态
+        # PSVR2Toolkit
         toolkit = self.detector.toolkit
         if toolkit.driver_installed:
-            self.toolkit_status_var.set(f"✅ {toolkit.driver_version}")
-            self.toolkit_status_label.config(fg=COLORS["green"])
+            if toolkit.toolkit_active:
+                self.toolkit_status_var.set(f"✅ {toolkit.driver_version} (激活)")
+                self.toolkit_status_label.config(fg=COLORS["green"])
+                self.switch_btn.config(text="⏪ 恢复官方", bg=COLORS["accent"])
+            else:
+                self.toolkit_status_var.set(f"⚠️ {toolkit.driver_version}")
+                self.toolkit_status_label.config(fg=COLORS["yellow"])
+                self.switch_btn.config(text="🔄 切换Toolkit", bg=COLORS["orange"])
         else:
             self.toolkit_status_var.set("❌ 未安装")
             self.toolkit_status_label.config(fg=COLORS["red"])
 
-        # VRCFaceTracking 状态
-        vrcft = self.detector.vrcft
-        if vrcft.installed:
-            if vrcft.psvr2_module_installed:
-                self.vrcft_status_label.config(text="✅ 已安装模块", fg=COLORS["green"])
-            else:
-                self.vrcft_status_label.config(text="⚠️ 缺少 PSVR2 模块", fg=COLORS["yellow"])
+        # SteamVR
+        if self.detector.steamvr.is_running:
+            self.steamvr_status_var.set("▶ 运行中")
+            self.steamvr_status_label.config(fg=COLORS["green"])
         else:
-            self.vrcft_status_label.config(text="❌ 未安装", fg=COLORS["red"])
+            self.steamvr_status_var.set("⏹ 未运行")
+            self.steamvr_status_label.config(fg=COLORS["text_light"])
+
+        # VRCFaceTracking
+        vrcft = self.detector.vrcft
+        if vrcft.is_running:
+            if vrcft.psvr2_module_installed:
+                self.vrcft_status_var.set("▶ 运行中 (模块✅)")
+                self.vrcft_status_label.config(fg=COLORS["green"])
+            else:
+                self.vrcft_status_var.set("▶ 运行中 (无PSVR2模块)")
+                self.vrcft_status_label.config(fg=COLORS["yellow"])
+        elif vrcft.installed:
+            if vrcft.psvr2_module_installed:
+                self.vrcft_status_var.set("已安装 (模块✅)")
+                self.vrcft_status_label.config(fg=COLORS["text_white"])
+            else:
+                self.vrcft_status_var.set("已安装 (无PSVR2模块)")
+                self.vrcft_status_label.config(fg=COLORS["yellow"])
+        else:
+            self.vrcft_status_var.set("❌ 未安装")
+            self.vrcft_status_label.config(fg=COLORS["red"])
 
         # 功能状态
-        for key, frame in self.feature_frames.items():
+        for key, label in self.feature_labels.items():
             feat = self.detector.features[key]
-            frame["status_label"].config(
-                text=feat["status"],
-                fg=self._status_color(feat["status"])
-            )
+            label.config(text=feat["status"], fg=COLORS.get(feat["color"], COLORS["gray"]))
 
+    # ---- 进程监控 ----
+    def _start_monitor(self):
+        """启动定期进程监控"""
+        self._monitor_loop()
+
+    def _monitor_loop(self):
+        """监控循环（每5秒）"""
+        def check():
+            steamvr_running = self.detector.steamvr.check_running()
+            vrcft_running = self.detector.vrcft.check_running()
+            self.root.after(0, self._update_process_status, steamvr_running, vrcft_running)
+
+        threading.Thread(target=check, daemon=True).start()
+        self.root.after(5000, self._monitor_loop)
+
+    def _update_process_status(self, steamvr_running, vrcft_running):
+        """更新进程状态"""
+        if steamvr_running:
+            self.steamvr_status_var.set("▶ 运行中")
+            self.steamvr_status_label.config(fg=COLORS["green"])
+        else:
+            self.steamvr_status_var.set("⏹ 未运行")
+            self.steamvr_status_label.config(fg=COLORS["text_light"])
+
+        vrcft = self.detector.vrcft
+        if vrcft_running:
+            mod = "模块✅" if vrcft.psvr2_module_installed else "无PSVR2模块"
+            self.vrcft_status_var.set(f"▶ 运行中 ({mod})")
+            self.vrcft_status_label.config(fg=COLORS["green"] if vrcft.psvr2_module_installed else COLORS["yellow"])
+        elif vrcft.installed:
+            if vrcft.psvr2_module_installed:
+                self.vrcft_status_var.set("已安装 (模块✅)")
+                self.vrcft_status_label.config(fg=COLORS["text_white"])
+            else:
+                self.vrcft_status_var.set("已安装 (无PSVR2模块)")
+                self.vrcft_status_label.config(fg=COLORS["yellow"])
+
+    # ---- 驱动管理 ----
+    def _switch_driver(self):
+        """切换驱动"""
+        toolkit = self.detector.toolkit
+        if toolkit.toolkit_active:
+            result = messagebox.askyesno(
+                "切换驱动",
+                "确定要切换回官方驱动吗？\n\n"
+                "⚠️ 切换后将失去眼动追踪等功能\n"
+                "需要重启 SteamVR 生效"
+            )
+            if result:
+                success, msg = toolkit.switch_to_official()
+                if success:
+                    messagebox.showinfo("成功", f"{msg}\n\n请重启 SteamVR 使更改生效")
+                else:
+                    messagebox.showerror("失败", msg)
+                self._run_detection()
+        else:
+            result = messagebox.askyesno(
+                "切换驱动",
+                "确定要切换到 PSVR2Toolkit 驱动吗？\n\n"
+                "✅ 将解锁眼动追踪、头显震动等功能\n"
+                "需要重启 SteamVR 生效"
+            )
+            if result:
+                success, msg = toolkit.switch_to_toolkit()
+                if success:
+                    messagebox.showinfo("成功", f"{msg}\n\n请重启 SteamVR 使更改生效")
+                else:
+                    messagebox.showerror("失败", msg)
+                self._run_detection()
+
+    def _check_update(self):
+        """检查驱动更新"""
+        self.update_status_label.config(text="检查中...", fg=COLORS["yellow"])
+        self.update_btn.config(state=tk.DISABLED)
+
+        def check():
+            ok, ver = self.detector.toolkit.check_update()
+            self.root.after(0, self._on_update_checked, ok, ver)
+
+        threading.Thread(target=check, daemon=True).start()
+
+    def _on_update_checked(self, ok, ver):
+        self.update_btn.config(state=tk.NORMAL)
+        if ok:
+            self.update_status_label.config(
+                text=f"最新: {ver}",
+                fg=COLORS["green"]
+            )
+            result = messagebox.askyesno(
+                "更新可用",
+                f"PSVR2Toolkit 最新版本: {ver}\n\n是否打开下载页面？"
+            )
+            if result:
+                os.startfile(PSVR2TOOLKIT_URL + "/releases/latest")
+        else:
+            self.update_status_label.config(text="检查失败", fg=COLORS["red"])
+
+    # ---- 启动功能 ----
     def _launch_steamvr(self):
-        """启动 SteamVR"""
         for path in STEAMVR_PATHS:
             if os.path.exists(path):
                 subprocess.Popen([path])
-                messagebox.showinfo("SteamVR", "SteamVR 已启动！")
                 return
-
-        # 通过 Steam 协议启动
         try:
             os.startfile("steam://rungameid/250820")
-            messagebox.showinfo("SteamVR", "正在通过 Steam 启动...")
         except Exception:
             messagebox.showwarning("未找到", "未检测到 SteamVR 安装")
 
     def _launch_vrcft(self):
-        """启动 VRCFaceTracking"""
         if self.detector.vrcft.launch():
-            messagebox.showinfo("VRCFaceTracking", "VRCFaceTracking 已启动！")
+            pass
         else:
             messagebox.showwarning("未安装", "VRCFaceTracking 未安装\n\n请点击「下载」按钮获取")
 
+    def _launch_all(self):
+        """一键启动全部"""
+        self._launch_steamvr()
+        if self.detector.vrcft.installed:
+            time.sleep(2)
+            self._launch_vrcft()
+        else:
+            messagebox.showwarning("提示", "VRCFaceTracking 未安装，仅启动 SteamVR")
+
     def _download_vrcft(self):
-        """打开 VRCFaceTracking 下载页"""
         os.startfile(VRCFT_DOWNLOAD_URL)
 
     def _open_driver_folder(self):
-        """打开驱动目录"""
-        path = self.detector.toolkit.driver_path
+        path = self.detector.toolkit.driver_dir
         if path and os.path.exists(path):
             os.startfile(path)
         else:
             messagebox.showinfo("提示", "未找到 PSVR2 驱动目录")
 
     def _open_toolkit_github(self):
-        """打开 PSVR2Toolkit GitHub"""
         os.startfile(PSVR2TOOLKIT_URL)
 
     def _open_vrcft_module(self):
-        """打开 VRCFT 模块页面"""
         os.startfile(VRCFT_MODULE_URL)
 
     def _show_about(self):
-        """关于"""
         messagebox.showinfo(
             f"关于 {APP_NAME}",
             f"{APP_NAME} v{APP_VERSION}\n\n"
             f"PS VR2 PC 控制面板\n"
-            f"集成 PSVR2Toolkit 工具链\n\n"
-            f"功能：\n"
-            f"• 检测 PS VR2 连接状态\n"
-            f"• 管理 PSVR2Toolkit 功能\n"
-            f"• 集成 VRCFaceTracking 眼动追踪\n"
-            f"• 一键启动 SteamVR\n\n"
+            f"深度集成 PSVR2Toolkit 工具链\n\n"
+            f"v3.0 新功能：\n"
+            f"• 驱动一键切换 (官方 ↔ Toolkit)\n"
+            f"• VRCFT PSVR2 模块状态检测\n"
+            f"• SteamVR / VRCFT 进程监控\n"
+            f"• GitHub 驱动更新检查\n"
+            f"• 一键启动全部工具\n\n"
             f"作者: {APP_AUTHOR}\n"
             f"https://gitee.com/cpufreestyle/psvr2-panel"
         )
 
     def run(self):
-        """启动"""
         self.root.mainloop()
 
 
