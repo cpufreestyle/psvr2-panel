@@ -18,6 +18,32 @@ import time
 import urllib.request
 import urllib.error
 from pathlib import Path
+import subprocess
+import sys
+
+# ---- 隐藏子进程控制台窗口 (Windows) ----
+if sys.platform == "win32":
+    _si = subprocess.STARTUPINFO()
+    _si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    _si.wShowWindow = subprocess.SW_HIDE
+else:
+    _si = None
+
+def _run_hidden(cmd, **kwargs):
+    """执行 subprocess.run，自动隐藏控制台窗口"""
+    kw = dict(capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10)
+    if sys.platform == "win32":
+        kw["startupinfo"] = _si
+    kw.update(kwargs)
+    return subprocess.run(cmd, **kw)
+
+def _popen_hidden(cmd, **kwargs):
+    """执行 subprocess.Popen，自动隐藏控制台窗口"""
+    kw = {}
+    if sys.platform == "win32":
+        kw["startupinfo"] = _si
+    kw.update(kwargs)
+    return subprocess.Popen(cmd, **kw)
 
 # ============================================================
 # 常量配置
@@ -315,11 +341,10 @@ class VRCFaceTrackingIntegration:
     def check_running(self):
         """检查 VRCFaceTracking 是否正在运行"""
         try:
-            result = subprocess.run(
+            result = _run_hidden(
                 ["powershell", "-Command",
                  "Get-Process VRCFaceTracking -ErrorAction SilentlyContinue | "
-                 "Select-Object Id, ProcessName | ConvertTo-Json -Compress"],
-                capture_output=True, text=True, timeout=5
+                 "Select-Object Id, ProcessName | ConvertTo-Json -Compress"]
             )
             if result.returncode == 0 and result.stdout.strip():
                 self.is_running = True
@@ -332,7 +357,7 @@ class VRCFaceTrackingIntegration:
     def launch(self):
         """启动 VRCFaceTracking"""
         if self.path and os.path.exists(self.path):
-            subprocess.Popen([self.path])
+            _popen_hidden([self.path])
             return True
         return False
 
@@ -368,11 +393,10 @@ class SteamVRMonitor:
     def check_running(self):
         """检查 SteamVR 是否运行"""
         try:
-            result = subprocess.run(
+            result = _run_hidden(
                 ["powershell", "-Command",
                  "Get-Process vrserver -ErrorAction SilentlyContinue | "
-                 "Select-Object Id | ConvertTo-Json -Compress"],
-                capture_output=True, text=True, timeout=5
+                 "Select-Object Id | ConvertTo-Json -Compress"]
             )
             self.is_running = result.returncode == 0 and result.stdout.strip() != ""
         except Exception:
@@ -382,11 +406,10 @@ class SteamVRMonitor:
     def check_psvr2_in_steamvr(self):
         """检查 SteamVR 是否识别 PSVR2"""
         try:
-            result = subprocess.run(
+            result = _run_hidden(
                 ["powershell", "-Command",
                  "Get-Content \"$env:LOCALAPPDATA\\openvr\\openvrpaths.vrpath\" "
-                 "-ErrorAction SilentlyContinue"],
-                capture_output=True, text=True, timeout=5
+                 "-ErrorAction SilentlyContinue"]
             )
             if result.returncode == 0 and "playstation" in result.stdout.lower():
                 self.psvr2_detected = True
@@ -432,11 +455,10 @@ class PSVR2Detector:
     def _detect_connection(self):
         """检测 PS VR2 是否连接"""
         try:
-            result = subprocess.run(
+            result = _run_hidden(
                 ["powershell", "-Command",
                  "Get-PnpDevice | Where-Object { $_.FriendlyName -match 'PlayStation|PSVR|VR2' } | "
-                 "Select-Object FriendlyName, Status | ConvertTo-Json -Compress"],
-                capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=10
+                 "Select-Object FriendlyName, Status | ConvertTo-Json -Compress"]
             )
             if result.returncode == 0 and result.stdout.strip():
                 try:
@@ -934,7 +956,7 @@ class PSVR2Panel:
     def _launch_steamvr(self):
         for path in STEAMVR_PATHS:
             if os.path.exists(path):
-                subprocess.Popen([path])
+                _popen_hidden([path])
                 return
         try:
             os.startfile("steam://rungameid/250820")
