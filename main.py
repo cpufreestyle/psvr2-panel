@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-PS VR2 PC 控制面板 — PSVR2 Panel v3.0
+PS VR2 PC 控制面板 — PSVR2 Panel v3.1
 一键管理 PS VR2 在 PC 上的解锁功能
 深度集成 PSVR2Toolkit 工具链
 作者: Michael Qiu (cpufreestyle)
@@ -17,6 +17,8 @@ import threading
 import time
 import urllib.request
 import urllib.error
+import zipfile
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -49,7 +51,7 @@ def _popen_hidden(cmd, **kwargs):
 # 常量配置
 # ============================================================
 APP_NAME = "PSVR2 Panel"
-APP_VERSION = "3.0.0"
+APP_VERSION = "3.2.0"
 APP_AUTHOR = "Michael Qiu"
 
 # 颜色主题（索尼 PlayStation 风格）
@@ -84,13 +86,13 @@ VRCFT_PATHS = [
     Path.home() / "AppData" / "Local" / "VRCFaceTracking" / "VRCFaceTracking.exe",
     Path("C:/Program Files/VRCFaceTracking/VRCFaceTracking.exe"),
 ]
+VRCFT_DEPLOY_DIR = Path.home() / "AppData" / "Local" / "PSVR2Panel" / "VRCFaceTracking"
 
 # GitHub 链接
 PSVR2TOOLKIT_URL = "https://github.com/BnuuySolutions/PSVR2Toolkit"
 PSVR2TOOLKIT_API = "https://api.github.com/repos/BnuuySolutions/PSVR2Toolkit/releases/latest"
-VRCFT_MODULE_URL = "https://github.com/BnuuySolutions/PSVR2Toolkit.VRCFT"
-VRCFT_MODULE_API = "https://api.github.com/repos/BnuuySolutions/PSVR2Toolkit.VRCFT/releases/latest"
 VRCFT_DOWNLOAD_URL = "https://github.com/benaclejames/VRCFaceTracking/releases"
+VRCFT_STEAM_URL = "steam://store/658580"  # VRCFaceTracking Steam 页面
 
 # 驱动文件名
 DRIVER_DLL = "driver_playstation_vr2.dll"
@@ -244,7 +246,7 @@ class PSVR2Toolkit:
         """检查 GitHub 上的最新版本"""
         try:
             req = urllib.request.Request(PSVR2TOOLKIT_API)
-            req.add_header("User-Agent", "PSVR2Panel/3.0")
+            req.add_header("User-Agent", "PSVR2Panel/3.1")
             with urllib.request.urlopen(req, timeout=10) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
                 self.latest_version = data.get("tag_name", "unknown")
@@ -291,26 +293,54 @@ class PSVR2Toolkit:
 # VRCFaceTracking 深度集成
 # ============================================================
 class VRCFaceTrackingIntegration:
-    """VRCFaceTracking 深度集成"""
+    """VRCFaceTracking 深度集成（内置部署）"""
+
+    BUNDLED_ZIP = "vrcft.zip"
 
     def __init__(self):
         self.installed = False
         self.path = None
-        self.psvr2_module_installed = False
-        self.module_path = None
         self.is_running = False
-        self.latest_module_version = None
-        self.latest_module_url = None
+        self.bundled = False
+
+    @staticmethod
+    def _get_bundled_zip_path():
+        """获取内置 vrcft.zip 的路径（兼容 PyInstaller 和开发模式）"""
+        if getattr(sys, 'frozen', False):
+            base = sys._MEIPASS
+        else:
+            base = Path(__file__).parent
+        return Path(base) / VRCFaceTrackingIntegration.BUNDLED_ZIP
+
+    def deploy_bundled(self):
+        """从内置 vrcft.zip 解压部署到 AppData，返回是否成功"""
+        zip_path = self._get_bundled_zip_path()
+        if not zip_path.exists():
+            return False
+        try:
+            dest = VRCFT_DEPLOY_DIR
+            exe = dest / "VRCFaceTracking.exe"
+            if exe.exists():
+                # 已部署过，直接用
+                return True
+            dest.mkdir(parents=True, exist_ok=True)
+            with zipfile.ZipFile(str(zip_path), 'r') as zf:
+                zf.extractall(str(dest))
+            return exe.exists()
+        except Exception:
+            return False
 
     def find_installation(self):
-        """查找 VRCFaceTracking 安装"""
+        """查找 VRCFaceTracking 安装（标准路径 > 内置部署）"""
+        # 1. 检查标准安装路径
         for path in VRCFT_PATHS:
             if path.exists():
                 self.installed = True
                 self.path = str(path)
+                self.bundled = False
                 return True
 
-        # 在 AppData 中搜索
+        # 2. AppData 广泛搜索
         appdata_local = Path.home() / "AppData" / "Local"
         if appdata_local.exists():
             for folder in appdata_local.iterdir():
@@ -319,23 +349,18 @@ class VRCFaceTrackingIntegration:
                     if exe.exists():
                         self.installed = True
                         self.path = str(exe)
+                        self.bundled = False
                         return True
-        return False
 
-    def check_psvr2_module(self):
-        """检查 PSVR2 VRCFT 模块是否已安装"""
-        module_dirs = [
-            Path.home() / "AppData" / "Roaming" / "VRCFaceTracking" / "Modules",
-            Path.home() / "AppData" / "Local" / "VRCFaceTracking" / "Modules",
-        ]
+        # 3. 从内置 zip 部署
+        if self.deploy_bundled():
+            exe = VRCFT_DEPLOY_DIR / "VRCFaceTracking.exe"
+            if exe.exists():
+                self.installed = True
+                self.path = str(exe)
+                self.bundled = True
+                return True
 
-        for modules_dir in module_dirs:
-            if modules_dir.exists():
-                for item in modules_dir.rglob("*"):
-                    if "psvr2" in item.name.lower():
-                        self.psvr2_module_installed = True
-                        self.module_path = str(modules_dir)
-                        return True
         return False
 
     def check_running(self):
@@ -360,24 +385,6 @@ class VRCFaceTrackingIntegration:
             _popen_hidden([self.path])
             return True
         return False
-
-    def check_module_update(self):
-        """检查 VRCFT PSVR2 模块最新版本"""
-        try:
-            req = urllib.request.Request(VRCFT_MODULE_API)
-            req.add_header("User-Agent", "PSVR2Panel/3.0")
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                self.latest_module_version = data.get("tag_name", "unknown")
-                assets = data.get("assets", [])
-                for asset in assets:
-                    name = asset["name"].lower()
-                    if name.endswith(".dll") or name.endswith(".zip"):
-                        self.latest_module_url = asset["browser_download_url"]
-                        break
-                return True, self.latest_module_version
-        except Exception as e:
-            return False, str(e)
 
 
 # ============================================================
@@ -445,7 +452,6 @@ class PSVR2Detector:
         self._detect_connection()
         self.toolkit.find_installation()
         self.vrcft.find_installation()
-        self.vrcft.check_psvr2_module()
         self.vrcft.check_running()
         self.steamvr.check_running()
         self.steamvr.check_psvr2_in_steamvr()
@@ -486,18 +492,23 @@ class PSVR2Detector:
 
 
 # ============================================================
-# GUI 主界面 v3.0
+# GUI 主界面 v3.1
 # ============================================================
 class PSVR2Panel:
-    """PS VR2 控制面板 v3.0 — 深度集成 PSVR2Toolkit"""
+    """PS VR2 控制面板 v3.2 — 深度集成 PSVR2Toolkit"""
 
     def __init__(self):
         self.detector = PSVR2Detector()
         self.root = tk.Tk()
         self.root.title(f"{APP_NAME} v{APP_VERSION}")
-        self.root.geometry("580x880")
-        self.root.resizable(False, False)
+        self.root.geometry("620x820")
+        self.root.minsize(380, 560)   # 可缩小到 380x560
+        self.root.maxsize(1200, 1400)
         self.root.configure(bg=COLORS["bg_dark"])
+
+        # ---- 内容容器（可随窗口拉伸） ----
+        self.content = tk.Frame(self.root, bg=COLORS["bg_dark"])
+        self.content.pack(fill=tk.BOTH, expand=True)
 
         # 状态变量
         self.status_var = tk.StringVar(value="正在检测...")
@@ -510,9 +521,42 @@ class PSVR2Panel:
         self._start_monitor()
 
     def _build_ui(self):
-        """构建界面"""
+        """构建界面（带滚动支持）"""
+        # Canvas + Scrollbar，让窗口可调整大小 + 可滚动
+        self.canvas = tk.Canvas(
+            self.content, bg=COLORS["bg_dark"],
+            highlightthickness=0, bd=0
+        )
+        self.scrollbar = tk.Scrollbar(
+            self.content, orient=tk.VERTICAL,
+            command=self.canvas.yview, bg=COLORS["bg_dark"]
+        )
+        self.scrollable = tk.Frame(self.canvas, bg=COLORS["bg_dark"])
+
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+        self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        self.scroll_id = self.canvas.create_window(
+            (0, 0), window=self.scrollable, anchor="nw"
+        )
+
+        def on_configure(e):
+            self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        self.scrollable.bind("<Configure>", on_configure)
+
+        def on_canvas_resize(e):
+            # 窗口缩小时自动显示滚动条
+            pass
+        self.canvas.bind("<Configure>", on_canvas_resize)
+
+        # 鼠标滚轮支持
+        def on_mousewheel(event):
+            self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        self.canvas.bind_all("<MouseWheel>", on_mousewheel)
+
         # ---- 顶部标题 ----
-        header = tk.Frame(self.root, bg=COLORS["bg_dark"])
+        header = tk.Frame(self.scrollable, bg=COLORS["bg_dark"])
         header.pack(fill=tk.X, padx=20, pady=(12, 3))
 
         tk.Label(
@@ -530,7 +574,7 @@ class PSVR2Panel:
 
         # ---- 连接状态 ----
         conn_frame = tk.Frame(
-            self.root, bg=COLORS["card_bg"],
+            self.scrollable, bg=COLORS["card_bg"],
             highlightbackground=COLORS["card_border"], highlightthickness=1
         )
         conn_frame.pack(fill=tk.X, padx=20, pady=6)
@@ -557,14 +601,14 @@ class PSVR2Panel:
 
         # ============ 驱动管理区 ============
         tk.Label(
-            self.root, text="🔧 驱动管理",
+            self.scrollable, text="🔧 驱动管理",
             font=("Microsoft YaHei", 12, "bold"),
             fg=COLORS["text_white"], bg=COLORS["bg_dark"]
         ).pack(anchor="w", padx=25, pady=(10, 3))
 
         # PSVR2Toolkit 状态
         toolkit_frame = tk.Frame(
-            self.root, bg=COLORS["card_bg"],
+            self.scrollable, bg=COLORS["card_bg"],
             highlightbackground=COLORS["card_border"], highlightthickness=1
         )
         toolkit_frame.pack(fill=tk.X, padx=20, pady=2)
@@ -605,7 +649,7 @@ class PSVR2Panel:
 
         # 更新检查
         update_frame = tk.Frame(
-            self.root, bg=COLORS["card_bg"],
+            self.scrollable, bg=COLORS["card_bg"],
             highlightbackground=COLORS["card_border"], highlightthickness=1
         )
         update_frame.pack(fill=tk.X, padx=20, pady=2)
@@ -634,14 +678,14 @@ class PSVR2Panel:
 
         # ============ SteamVR & VRCFT 状态 ============
         tk.Label(
-            self.root, text="🥽 运行状态",
+            self.scrollable, text="🥽 运行状态",
             font=("Microsoft YaHei", 12, "bold"),
             fg=COLORS["text_white"], bg=COLORS["bg_dark"]
         ).pack(anchor="w", padx=25, pady=(10, 3))
 
         # SteamVR 状态
         steamvr_frame = tk.Frame(
-            self.root, bg=COLORS["card_bg"],
+            self.scrollable, bg=COLORS["card_bg"],
             highlightbackground=COLORS["card_border"], highlightthickness=1
         )
         steamvr_frame.pack(fill=tk.X, padx=20, pady=2)
@@ -669,7 +713,7 @@ class PSVR2Panel:
 
         # VRCFaceTracking 状态
         vrcft_frame = tk.Frame(
-            self.root, bg=COLORS["card_bg"],
+            self.scrollable, bg=COLORS["card_bg"],
             highlightbackground=COLORS["card_border"], highlightthickness=1
         )
         vrcft_frame.pack(fill=tk.X, padx=20, pady=2)
@@ -700,16 +744,16 @@ class PSVR2Panel:
         self.vrcft_launch_btn.pack(side=tk.RIGHT, padx=(4, 0))
 
         tk.Button(
-            vrcft_btn_frame, text="📥 下载",
+            vrcft_btn_frame, text="🎮 Steam安装",
             font=("Microsoft YaHei", 8),
             bg=COLORS["accent"], fg=COLORS["text_white"],
             relief=tk.FLAT, cursor="hand2",
-            command=self._download_vrcft
+            command=self._install_vrcft_steam
         ).pack(side=tk.RIGHT, padx=4)
 
         # ============ 功能解锁状态 ============
         tk.Label(
-            self.root, text="📊 功能状态",
+            self.scrollable, text="📊 功能状态",
             font=("Microsoft YaHei", 12, "bold"),
             fg=COLORS["text_white"], bg=COLORS["bg_dark"]
         ).pack(anchor="w", padx=25, pady=(10, 3))
@@ -717,7 +761,7 @@ class PSVR2Panel:
         self.feature_labels = {}
         for key, feat in self.detector.features.items():
             frame = tk.Frame(
-                self.root, bg=COLORS["card_bg"],
+                self.scrollable, bg=COLORS["card_bg"],
                 highlightbackground=COLORS["card_border"], highlightthickness=1
             )
             frame.pack(fill=tk.X, padx=20, pady=2)
@@ -746,8 +790,8 @@ class PSVR2Panel:
             self.feature_labels[key] = status_label
 
         # ============ 底部操作区 ============
-        bottom = tk.Frame(self.root, bg=COLORS["bg_dark"])
-        bottom.pack(fill=tk.X, padx=20, pady=(12, 15), side=tk.BOTTOM)
+        bottom = tk.Frame(self.scrollable, bg=COLORS["bg_dark"])
+        bottom.pack(fill=tk.X, padx=20, pady=(12, 15))
 
         # 一键启动全部
         tk.Button(
@@ -770,13 +814,7 @@ class PSVR2Panel:
             command=self._open_toolkit_github
         ).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0, 3))
 
-        tk.Button(
-            tools_frame, text="🔌 VRCFT 模块",
-            font=("Microsoft YaHei", 9),
-            bg=COLORS["card_bg"], fg=COLORS["text_white"],
-            relief=tk.FLAT, cursor="hand2",
-            command=self._open_vrcft_module
-        ).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=3)
+
 
         tk.Button(
             tools_frame, text="ℹ️ 关于",
@@ -833,21 +871,15 @@ class PSVR2Panel:
         # VRCFaceTracking
         vrcft = self.detector.vrcft
         if vrcft.is_running:
-            if vrcft.psvr2_module_installed:
-                self.vrcft_status_var.set("▶ 运行中 (模块✅)")
-                self.vrcft_status_label.config(fg=COLORS["green"])
-            else:
-                self.vrcft_status_var.set("▶ 运行中 (无PSVR2模块)")
-                self.vrcft_status_label.config(fg=COLORS["yellow"])
+            tag = "内置" if vrcft.bundled else "本地"
+            self.vrcft_status_var.set(f"▶ 运行中 ({tag})")
+            self.vrcft_status_label.config(fg=COLORS["green"])
         elif vrcft.installed:
-            if vrcft.psvr2_module_installed:
-                self.vrcft_status_var.set("已安装 (模块✅)")
-                self.vrcft_status_label.config(fg=COLORS["text_white"])
-            else:
-                self.vrcft_status_var.set("已安装 (无PSVR2模块)")
-                self.vrcft_status_label.config(fg=COLORS["yellow"])
+            tag = "内置" if vrcft.bundled else "已安装"
+            self.vrcft_status_var.set(tag)
+            self.vrcft_status_label.config(fg=COLORS["text_white"])
         else:
-            self.vrcft_status_var.set("❌ 未安装")
+            self.vrcft_status_var.set("❌ 未部署")
             self.vrcft_status_label.config(fg=COLORS["red"])
 
         # 功能状态
@@ -881,16 +913,13 @@ class PSVR2Panel:
 
         vrcft = self.detector.vrcft
         if vrcft_running:
-            mod = "模块✅" if vrcft.psvr2_module_installed else "无PSVR2模块"
-            self.vrcft_status_var.set(f"▶ 运行中 ({mod})")
-            self.vrcft_status_label.config(fg=COLORS["green"] if vrcft.psvr2_module_installed else COLORS["yellow"])
+            tag = "内置" if vrcft.bundled else "本地"
+            self.vrcft_status_var.set(f"▶ 运行中 ({tag})")
+            self.vrcft_status_label.config(fg=COLORS["green"])
         elif vrcft.installed:
-            if vrcft.psvr2_module_installed:
-                self.vrcft_status_var.set("已安装 (模块✅)")
-                self.vrcft_status_label.config(fg=COLORS["text_white"])
-            else:
-                self.vrcft_status_var.set("已安装 (无PSVR2模块)")
-                self.vrcft_status_label.config(fg=COLORS["yellow"])
+            tag = "内置" if vrcft.bundled else "已安装"
+            self.vrcft_status_var.set(tag)
+            self.vrcft_status_label.config(fg=COLORS["text_white"])
 
     # ---- 驱动管理 ----
     def _switch_driver(self):
@@ -981,6 +1010,14 @@ class PSVR2Panel:
     def _download_vrcft(self):
         os.startfile(VRCFT_DOWNLOAD_URL)
 
+    def _install_vrcft_steam(self):
+        """打开 VRCFaceTracking Steam 页面"""
+        try:
+            os.startfile(VRCFT_STEAM_URL)
+        except Exception:
+            # 如果 steam:// 协议失败，打开网页版
+            os.startfile("https://store.steampowered.com/app/658580/VRCFaceTracking/")
+
     def _open_driver_folder(self):
         path = self.detector.toolkit.driver_dir
         if path and os.path.exists(path):
@@ -991,18 +1028,18 @@ class PSVR2Panel:
     def _open_toolkit_github(self):
         os.startfile(PSVR2TOOLKIT_URL)
 
-    def _open_vrcft_module(self):
-        os.startfile(VRCFT_MODULE_URL)
-
     def _show_about(self):
         messagebox.showinfo(
             f"关于 {APP_NAME}",
             f"{APP_NAME} v{APP_VERSION}\n\n"
             f"PS VR2 PC 控制面板\n"
             f"深度集成 PSVR2Toolkit 工具链\n\n"
-            f"v3.0 新功能：\n"
+            f"v3.2 更新：\n"
+            f"• 移除 GitHub 下载按钮（项目已停止维护）\n"
+            f"• 保留 Steam 安装渠道\n\n"
+            f"v3.1 新功能：\n"
             f"• 驱动一键切换 (官方 ↔ Toolkit)\n"
-            f"• VRCFT PSVR2 模块状态检测\n"
+            f"• 内置 VRCFaceTracking 自动部署\n"
             f"• SteamVR / VRCFT 进程监控\n"
             f"• GitHub 驱动更新检查\n"
             f"• 一键启动全部工具\n\n"

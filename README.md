@@ -1,14 +1,17 @@
-# PS VR2 PC 控制面板
+# PS VR2 PC 控制面板 v3.2
 
 PlayStation VR2 PC 管理工具，一键解锁 PS VR2 在 PC 上的隐藏功能。
 
 ## 功能
 
 - ✅ 检测 PS VR2 连接状态
+- ✅ 驱动一键切换 (官方 ↔ PSVR2Toolkit)
 - ✅ 显示功能解锁状态（眼动追踪、头显震动、HDR等）
-- ✅ 一键启动 SteamVR
+- ✅ 一键启动 SteamVR / VRCFaceTracking
+- ✅ VRCFaceTracking Steam 安装入口（推荐）
+- ✅ SteamVR / VRCFT 进程监控
+- ✅ GitHub 驱动更新检查
 - ✅ PlayStation 蓝色主题界面
-- ✅ 系统托盘支持（计划中）
 
 ## 截图
 
