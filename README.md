@@ -1,4 +1,4 @@
-# PS VR2 PC 控制面板 v4.1.0
+# PS VR2 PC 控制面板 v4.2.0
 
 PlayStation VR2 PC 管理工具，一键解锁 PS VR2 在 PC 上的隐藏功能。
 
@@ -27,7 +27,7 @@ cd psvr2-panel
 python main.py
 ```
 
-或直接运行 `launch.bat`，或下载 `dist/PSVR2-Panel-v4.1.0.exe` 双击运行。
+或直接运行 `launch.bat`，或下载 `dist/PSVR2-Panel-v4.2.0.exe` 双击运行。
 
 ## 系统要求
 
