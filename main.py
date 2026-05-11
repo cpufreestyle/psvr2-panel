@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-PS VR2 PC 控制面板 — PSVR2 Panel v4.1.0
+PS VR2 PC 控制面板 — PSVR2 Panel v4.2.0
 一键管理 PS VR2 在 PC 上的解锁功能，深度集成 PSVR2Toolkit 工具链
 
 v4.1.0 更新：
@@ -15,7 +15,7 @@ v4.1.0 更新：
 """
 
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, simpledialog
 import subprocess
 import json
 import os
@@ -27,6 +27,7 @@ import logging.handlers
 import urllib.request
 import winreg
 import shutil
+import winsound
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, List, Tuple
@@ -35,7 +36,7 @@ from typing import Optional, Dict, List, Tuple
 # 常量 & 主题
 # ============================================================
 APP_NAME = "PSVR2 Panel"
-APP_VERSION = "4.1.0"
+APP_VERSION = "4.2.0"
 APP_AUTHOR = "Michael Qiu"
 GITEE_URL = "https://gitee.com/cpufreestyle/psvr2-panel"
 GITHUB_URL = "https://github.com/cpufreestyle/psvr2-panel"
@@ -557,6 +558,12 @@ class PSVR2Detector:
         self.vrcft.check_running()
         self.steamvr.check_running()
 
+    def refresh_connection(self) -> bool:
+        old = self.connected
+        self._detect_connection()
+        self._update_features()
+        return old != self.connected
+
 
 # ============================================================
 # SteamVR 设置管理
@@ -598,6 +605,51 @@ class SteamVRSettings:
         self.data["steamvr"][key] = value
 
 
+    # ── 预设管理 ──
+    def save_profile(self, name: str) -> Tuple[bool, str]:
+        if not self.data:
+            return False, "没有可保存的设置"
+        PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+        safe = "".join(c for c in name if c.isalnum() or c in "_ -").strip()
+        if not safe:
+            return False, "预设名称无效"
+        p = PROFILE_DIR / f"{safe}.json"
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump({"name": safe, "created": datetime.now().isoformat(),
+                       "settings": self.data.get("steamvr", {})}, f, ensure_ascii=False, indent=2)
+        log.info(f"预设已保存: {safe}")
+        return True, f"预设「{safe}」已保存"
+
+    def load_profile(self, name: str) -> Tuple[bool, str]:
+        safe = "".join(c for c in name if c.isalnum() or c in "_ -").strip()
+        p = PROFILE_DIR / f"{safe}.json"
+        if not p.exists():
+            return False, f"预设「{safe}」不存在"
+        with open(p, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        self.load()
+        if "steamvr" not in self.data:
+            self.data["steamvr"] = {}
+        self.data["steamvr"].update(data.get("settings", {}))
+        success, msg = self.save()
+        if success:
+            return True, f"预设「{safe}」已应用（重启 SteamVR 生效）"
+        return False, msg
+
+    def delete_profile(self, name: str) -> Tuple[bool, str]:
+        safe = "".join(c for c in name if c.isalnum() or c in "_ -").strip()
+        p = PROFILE_DIR / f"{safe}.json"
+        if p.exists():
+            p.unlink()
+            log.info(f"预设已删除: {safe}")
+            return True, f"预设「{safe}」已删除"
+        return False, "预设不存在"
+
+    def list_profiles(self) -> List[str]:
+        if not PROFILE_DIR.exists():
+            return []
+        return sorted(p.stem for p in PROFILE_DIR.glob("*.json"))
+
 # ============================================================
 # 卡片组件
 # ============================================================
@@ -617,29 +669,43 @@ def card(parent, title: str = "", pad: int = 12) -> Tuple[tk.Frame, tk.Frame]:
 def btn(parent, text: str, cmd, color: str = "accent", width: int = 0) -> tk.Button:
     colors = {
         "accent": (C["accent"], C["accent_hi"]),
-        "green": (C["green"], "#00e676"),
-        "red": (C["red"], "#ff5252"),
-        "orange": (C["orange"], "#ffab40"),
-        "gray": (C["card_hi"], "#2a3a6a"),
-        "teal": (C["teal"], "#26c6da"),
+        "green":  (C["green"],  C["green_hi"]),
+        "red":    (C["red"],    C["red_hi"]),
+        "orange": (C["orange"], C["orange_hi"]),
+        "gray":   (C["gray"],   C["gray_hi"]),
+        "teal":   (C["teal"],   C["teal_hi"]),
     }
     bg, ah = colors.get(color, colors["accent"])
     b = tk.Button(parent, text=text, font=("Microsoft YaHei", 9),
                   bg=bg, activebackground=ah, fg=C["text"],
-                  relief=tk.FLAT, cursor="hand2", command=cmd)
+                  relief=tk.FLAT, cursor="hand2", command=cmd, bd=0)
     if width:
         b.config(width=width)
+    b.bind("<Enter>", lambda e, _b=b, _c=ah: _b.config(bg=_c))
+    b.bind("<Leave>", lambda e, _b=b, _c=bg: _b.config(bg=_c))
     return b
 
 
 # ============================================================
 # 主面板
 # ============================================================
+
+def section(parent, text: str, color: str = None) -> tk.Frame:
+    """彩色分区标题栏"""
+    bg = color or C["accent"]
+    f = tk.Frame(parent, bg=bg, height=28)
+    f.pack(fill="x", padx=12, pady=(12, 0))
+    f.pack_propagate(False)
+    tk.Label(f, text=f"  {text}", font=("Microsoft YaHei", 10, "bold"),
+             fg=C["text"], bg=bg).pack(side="left")
+    return f
+
 class PSVR2Panel:
     def __init__(self):
         self.detector = PSVR2Detector()
         self.sv_settings = SteamVRSettings()
         self._stop_monitor = threading.Event()
+        self._last_connected: Optional[bool] = None
         self._tray_installed = False
 
         self.root = tk.Tk()
@@ -649,11 +715,28 @@ class PSVR2Panel:
         self.root.configure(bg=C["bg"])
         self.root.protocol("WM_DELETE_WINDOW", self._on_close_request)
 
+        self._setup_ttk_theme()
         self._build_ui()
         self._run_detection()
         self._start_monitor()
 
         log.info(f"{APP_NAME} v{APP_VERSION} 已启动")
+
+    def _setup_ttk_theme(self):
+        s = ttk.Style()
+        s.theme_use("clam")
+        s.configure("TNotebook", background=C["bg"], borderwidth=0)
+        s.configure("TNotebook.Tab", background=C["card"], foreground=C["text"],
+                     padding=[14, 6], font=("Microsoft YaHei", 9))
+        s.map("TNotebook.Tab",
+               background=[("selected", C["accent"])],
+               foreground=[("selected", C["text"])])
+        s.configure("TCheckbutton", background=C["card"], foreground=C["text"],
+                     font=("Microsoft YaHei", 9))
+        s.map("TCheckbutton", background=[("active", C["card_hi"])])
+        s.configure("TScale", background=C["card"], troughcolor=C["card_hi"])
+        s.configure("Vertical.TScrollbar", background=C["card_hi"],
+                     troughcolor=C["bg"], arrowcolor=C["text"], borderwidth=0)
 
     # ── 界面构建 ──────────────────────────────────────────
     def _build_ui(self):
@@ -681,11 +764,13 @@ class PSVR2Panel:
             "<Configure>",
             lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
         )
-        canvas.create_window((0, 0), window=self.scroll_frame, anchor="nw")
+        self._canvas = canvas
+        canvas.create_window((0, 0), window=self.scroll_frame, anchor="nw", tags="scroll_win")
         canvas.configure(yscrollcommand=scrollbar.set)
 
-        canvas.pack(fill="both", expand=True, padx=12, pady=(8, 0))
+        canvas.pack(fill="both", expand=True, padx=0, pady=(8, 0))
         scrollbar.pack(fill="y", side="right", pady=(8, 0))
+        canvas.bind("<Configure>", lambda e: canvas.itemconfig("scroll_win", width=e.width - 16))
 
         # 鼠标滚轮支持
         def _on_mousewheel(event):
@@ -695,9 +780,11 @@ class PSVR2Panel:
         self._build_dashboard()
         self._build_driver_tab()
         self._build_settings_tab()
-        self._build_bottom_bar()
+        self._build_launcher_section()
+        self._build_log_section()
 
     def _build_dashboard(self):
+        section(self.scroll_frame, "📊 仪表盘", C["accent"])
         p = self.scroll_frame
 
         # 连接状态卡片
@@ -764,6 +851,7 @@ class PSVR2Panel:
             self.feat_labels[k] = lbl
 
     def _build_driver_tab(self):
+        section(self.scroll_frame, "🔧 驱动管理", C["teal"])
         p = self.scroll_frame
 
         # 当前驱动状态
@@ -837,6 +925,7 @@ class PSVR2Panel:
         self._refresh_backup_list()
 
     def _build_settings_tab(self):
+        section(self.scroll_frame, "⚙️ SteamVR 设置", C["orange"])
         p = self.scroll_frame
         self.sv_settings.load()
 
@@ -880,6 +969,18 @@ class PSVR2Panel:
             side="left", padx=(0, 6))
         btn(btn_frame, "↩ 恢复默认", self._reset_sv_settings, "gray", 10).pack(side="left")
 
+        # 配置预设
+        _, pf = card(p, "💾 配置预设")
+        pfc = tk.Frame(pf, bg=C["card"])
+        pfc.pack(fill="x")
+        self.profile_combo = ttk.Combobox(pfc, values=self.sv_settings.list_profiles(),
+                                           state="readonly", width=16,
+                                           font=("Microsoft YaHei", 9))
+        self.profile_combo.pack(side="left", padx=(0, 6))
+        btn(pfc, "💾 保存", self._save_profile, "teal", 6).pack(side="left", padx=(0, 4))
+        btn(pfc, "♻ 加载", self._load_profile, "accent", 6).pack(side="left", padx=(0, 4))
+        btn(pfc, "🗑 删除", self._delete_profile, "red", 6).pack(side="left")
+
         if not self.sv_settings.path:
             tk.Label(c, text="⚠ SteamVR 设置文件未找到",
                      font=("Microsoft YaHei", 8), fg=C["yellow"],
@@ -916,12 +1017,32 @@ class PSVR2Panel:
         btn(startup_frame, "VRCFT (Steam)", self._open_vrcft_steam, "gray", 12).pack(side="right")
 
     def _build_bottom_bar(self):
+        pass  # Replaced by launcher + log sections below
+
+    def _build_launcher_section(self):
+        section(self.scroll_frame, "🚀 快速启动", C["green"])
         p = self.scroll_frame
-        bar = tk.Frame(p, bg=C["bg"])
-        bar.pack(fill="x", pady=(6, 8))
-        btn(bar, "🚀 一键启动全部", self._launch_all, "green").pack(
-            side="left", fill="x", expand=True, padx=(0, 4))
-        btn(bar, "ℹ 关于", self._show_about, "gray", 8).pack(side="right")
+        _, c = card(p, "")
+        btn(c, "🚀 启动 SteamVR + VRCFT", self._launch_all, "green").pack(fill="x", pady=2)
+        sf = tk.Frame(c, bg=C["card"])
+        sf.pack(fill="x", pady=(4, 0))
+        btn(sf, "SteamVR", self._launch_steamvr, "accent", 9).pack(side="left", padx=(0, 4))
+        btn(sf, "VRCFT", self._launch_vrcft, "accent", 9).pack(side="left")
+        btn(sf, "VRCFT (Steam)", self._open_vrcft_steam, "gray", 12).pack(side="right")
+
+    def _build_log_section(self):
+        section(self.scroll_frame, "📝 日志", C["gray_hi"])
+        p = self.scroll_frame
+        _, c = card(p, "")
+        self.log_text = tk.Text(c, font=("Consolas", 8), bg=C["bg"], fg=C["text_sub"],
+                                 height=6, wrap="word", relief=tk.FLAT, bd=0,
+                                 insertbackground=C["text"])
+        self.log_text.pack(fill="x")
+        lbf = tk.Frame(c, bg=C["card"])
+        lbf.pack(fill="x", pady=(4, 0))
+        btn(lbf, "🔄 刷新", self._refresh_log, "gray", 8).pack(side="left", padx=(0, 4))
+        btn(lbf, "📂 打开日志", self._open_log_file, "gray", 10).pack(side="left")
+        self._refresh_log()
 
     # ── 检测与监控 ──────────────────────────────────────
     def _run_detection(self):
@@ -972,6 +1093,8 @@ class PSVR2Panel:
         def loop():
             while not self._stop_monitor.wait(3):
                 self.detector.refresh_runtime()
+                if self.detector.refresh_connection():
+                    self.root.after(0, self._on_connection_changed)
                 self.root.after(0, self._update_runtime_ui)
         t = threading.Thread(target=loop, daemon=True)
         t.start()
@@ -989,6 +1112,22 @@ class PSVR2Panel:
             self.vrcft_lbl.config(text=f"已安装{tag}", fg=C["text"])
         else:
             self.vrcft_lbl.config(text="❌ 未安装", fg=C["red"])
+
+    def _on_connection_changed(self):
+        """PSVR2 连接/断开通知"""
+        if self.detector.connected:
+            try:
+                winsound.MessageBeep(winsound.MB_ICONEXCLAMATION)
+            except Exception:
+                pass
+            log.info("🔔 PS VR2 已连接")
+        else:
+            try:
+                winsound.MessageBeep(winsound.MB_ICONHAND)
+            except Exception:
+                pass
+            log.info("🔔 PS VR2 已断开")
+        self._update_ui()
 
     # ── 驱动操作 ────────────────────────────────────────
     def _switch_driver(self):
@@ -1146,6 +1285,45 @@ class PSVR2Panel:
         messagebox.showinfo("重置", "已恢复默认值，请点击「应用设置」保存")
 
     # ── 系统选项 ────────────────────────────────────────
+    def _save_profile(self):
+        name = self.profile_combo.get()
+        if not name:
+            name = simpledialog.askstring("预设名称", "请输入预设名称:", parent=self.root)
+        if name:
+            success, msg = self.sv_settings.save_profile(name)
+            if success:
+                self.profile_combo.config(values=self.sv_settings.list_profiles())
+                messagebox.showinfo("预设", msg)
+            else:
+                messagebox.showerror("失败", msg)
+
+    def _load_profile(self):
+        name = self.profile_combo.get()
+        if not name:
+            messagebox.showwarning("提示", "请先选择一个预设")
+            return
+        success, msg = self.sv_settings.load_profile(name)
+        if success:
+            self.sv_settings.load()
+            self.sample_scale.set(float(self.sv_settings.get("renderTargetMultiplier", 1.0)))
+            self.cb_filter.set(bool(self.sv_settings.get("allowSupersampleFiltering", True)))
+            self.cb_smooth.set(bool(self.sv_settings.get("motionSmoothing", True)))
+            self._update_scale_lbl()
+            messagebox.showinfo("预设", msg)
+        else:
+            messagebox.showerror("失败", msg)
+
+    def _delete_profile(self):
+        name = self.profile_combo.get()
+        if not name:
+            messagebox.showwarning("提示", "请先选择一个预设")
+            return
+        if messagebox.askyesno("确认", f"删除预设「{name}」？"):
+            success, msg = self.sv_settings.delete_profile(name)
+            self.profile_combo.config(values=self.sv_settings.list_profiles())
+            self.profile_combo.set("")
+            messagebox.showinfo("预设", msg)
+
     def _toggle_auto_start(self):
         enabled = self.auto_start_var.get()
         success = set_auto_start(enabled)
@@ -1155,6 +1333,30 @@ class PSVR2Panel:
         else:
             self.auto_start_var.set(not enabled)
             messagebox.showerror("失败", "无法修改开机启动设置")
+
+    def _refresh_log(self):
+        self.log_text.config(state="normal")
+        self.log_text.delete("1.0", "end")
+        log_file = LOG_DIR / "psvr2_panel.log"
+        if log_file.exists():
+            try:
+                with open(log_file, "r", encoding="utf-8") as f:
+                    lines = f.readlines()
+                for line in lines[-30:]:
+                    self.log_text.insert("end", line)
+            except Exception:
+                self.log_text.insert("end", "读取日志失败")
+        else:
+            self.log_text.insert("end", "暂无日志")
+        self.log_text.see("end")
+        self.log_text.config(state="disabled")
+
+    def _open_log_file(self):
+        log_file = LOG_DIR / "psvr2_panel.log"
+        if log_file.exists():
+            os.startfile(str(log_file))
+        else:
+            messagebox.showinfo("提示", "日志文件不存在")
 
     # ── 启动操作 ────────────────────────────────────────
     def _launch_steamvr(self):
