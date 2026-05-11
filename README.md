@@ -1,4 +1,4 @@
-# PS VR2 PC 控制面板 v4.0.0
+# PS VR2 PC 控制面板 v4.1.0
 
 PlayStation VR2 PC 管理工具，一键解锁 PS VR2 在 PC 上的隐藏功能。
 
@@ -14,34 +14,36 @@ PlayStation VR2 PC 管理工具，一键解锁 PS VR2 在 PC 上的隐藏功能�
 - ✅ GitHub 驱动更新检查
 - ✅ 设备信息面板（USB 连接详情）
 - ✅ PlayStation 风格深色主题 UI
-
-## 截图
-
-![PSVR2 Panel](screenshot.png)
+- ✅ **系统托盘**（最小化到托盘，后台运行，右键菜单）
+- ✅ **开机启动**（Windows 注册表 Run 项）
+- ✅ **一键安装 PSVR2Toolkit**（自动从 GitHub 下载）
+- ✅ 可滚动画布（界面内容再多不被裁剪）
 
 ## 安装
 
 ```bash
-# 克隆仓库
 git clone https://gitee.com/cpufreestyle/psvr2-panel.git
-
-# 进入目录
 cd psvr2-panel
-
-# 安装依赖
-pip install -r requirements.txt
-
-# 运行
 python main.py
 ```
 
-或直接运行 `launch.bat`
+或直接运行 `launch.bat`，或下载 `dist/PSVR2-Panel-v4.1.0.exe` 双击运行。
 
 ## 系统要求
 
 - Windows 10/11 64位
-- Python 3.6+
+- Python 3.6+（exe 版本无需 Python）
 - tkinter（Python 内置）
+
+## v4.1.0 更新
+
+| 类别 | 更新内容 |
+|------|---------|
+| 🐛 Bug | `toolable_active` 拼写修正 / 时间戳健壮解析 / 清理未用导入 |
+| 🪶 托盘 | 关闭按钮最小化到系统托盘，后台运行，右键菜单（显示/刷新/退出） |
+| ⚡ 启动 | Windows 开机自动启动开关（注册表 Run 项） |
+| 📜 界面 | 可滚动画布，内容再多也不被裁剪 |
+| ⬇️ 安装 | 一键从 GitHub 下载安装 PSVR2Toolkit，无需手动操作 |
 
 ## v4.0.0 更新
 
@@ -53,11 +55,6 @@ python main.py
 | ⚡ 性能 | tasklist 替代 PowerShell，单线程监控 |
 | 🔧 代码 | 日志系统、类型提示、无重复导入 |
 | 📊 设备 | USB 连接详情（设备名称/状态/ID） |
-
-## v3.x 更新
-
-- **v3.2**: 移除 GitHub 下载按钮（项目已停止维护），保留 Steam 安装渠道
-- **v3.1**: 驱动一键切换 / 内置 VRCFaceTracking 自动部署 / SteamVR 进程监控 / GitHub 驱动更新检查 / 一键启动全部工具
 
 ## PSVR2Toolkit
 
