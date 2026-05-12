@@ -23,6 +23,7 @@ exe = EXE(
     a.datas,
     [],
     name='PSVR2-Panel-v4.0.0',
+    icon='psvr2-panel.ico',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -36,3 +37,4 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
 )
+
