@@ -29,6 +29,7 @@ import winsound
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, List, Tuple
+from auto_updater import AutoUpdater
 
 # ============================================================
 # 常量 & 主题
@@ -1458,7 +1459,31 @@ class PSVR2Panel:
             f"{GITHUB_URL}"
         )
 
+    def _check_update(self):
+        """后台检查更新"""
+        def _on_update(new_ver, updater):
+            changelog = updater.get_changelog()
+            msg = f"发现新版本 v{new_ver}！\n当前版本: v{APP_VERSION}\n\n"
+            if changelog:
+                msg += f"更新内容:\n{changelog[:300]}\n\n"
+            msg += "是否立即下载更新？"
+            result = messagebox.askyesno("📦 发现新版本", msg, parent=self.root)
+            if result:
+                if updater.download_and_update(new_ver):
+                    messagebox.showinfo("更新", "下载完成！点击确定重启应用。", parent=self.root)
+                    updater.apply_update()
+        
+        check_update_background(
+            app_name=APP_NAME,
+            current_version=APP_VERSION,
+            gitee_owner="cpufreestyle",
+            gitee_repo="psvr2-panel",
+            exe_pattern="PSVR2-Panel-v{version}.exe",
+            callback=_on_update
+        )
+
     def run(self):
+        self.root.after(2000, self._check_update)
         self.root.mainloop()
 
 
