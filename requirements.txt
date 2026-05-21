@@ -1,6 +1,6 @@
 # PS VR2 Panel 依赖
-# 无外部依赖，仅需 Python 3.6+ 和 tkinter（内置）
+# Python 3.6+ 内置: tkinter, pathlib, json, logging, subprocess, threading, urllib, winreg, shutil, winsound
 
-# 可选：系统托盘支持（未来版本）
-# pystray>=0.19.0
-# Pillow>=9.0.0
+# 可选依赖
+pystray>=0.19.0   # 系统托盘功能（最小化到托盘）
+Pillow>=9.0.0     # pystray 托盘图标依赖

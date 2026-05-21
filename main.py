@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-PS VR2 PC 控制面板 — PSVR2 Panel v4.2.0
+PS VR2 PC 控制面板 — PSVR2 Panel v4.3.0
 一键管理 PS VR2 在 PC 上的解锁功能，深度集成 PSVR2Toolkit 工具链
 
-v4.1.0 更新：
-  🐛 Bug 修复：toolable_active 拼写错误 / 时间戳健壮解析 / 未使用导入清理
- tray 系统托盘：最小化到托盘，后台运行，托盘右键菜单
-  ⚡ 开机启动：一键开关 Windows 自动启动
-  📜 滚动支持：窗口内容过多时可滚动
-  ⬇️ 一键安装：直接从 GitHub 下载安装 PSVR2Toolkit
+v4.3.0 更新：
+  🐛 Bug 修复：修复 PROFILE_DIR 未定义的致命 Bug
+  📦 规范：.gitignore 完善 / requirements.txt 整理
+  📝 文档：README 添加 Badges、exe 下载链接
 
 作者: Michael Qiu (cpufreestyle)
 """
@@ -36,7 +34,7 @@ from typing import Optional, Dict, List, Tuple
 # 常量 & 主题
 # ============================================================
 APP_NAME = "PSVR2 Panel"
-APP_VERSION = "4.2.0"
+APP_VERSION = "4.3.0"
 APP_AUTHOR = "Michael Qiu"
 GITEE_URL = "https://gitee.com/cpufreestyle/psvr2-panel"
 GITHUB_URL = "https://github.com/cpufreestyle/psvr2-panel"
@@ -73,6 +71,7 @@ VRCFT_PATHS = [
 VRCFT_DEPLOY = Path.home() / "AppData" / "Local" / "PSVR2Panel" / "VRCFaceTracking"
 BACKUP_DIR = Path.home() / "AppData" / "Local" / "PSVR2Panel" / "backups"
 LOG_DIR = Path.home() / "AppData" / "Local" / "PSVR2Panel" / "logs"
+PROFILE_DIR = Path.home() / "AppData" / "Local" / "PSVR2Panel" / "profiles"
 
 DRIVER_DLL = "driver_playstation_vr2.dll"
 DRIVER_ORIG = "driver_playstation_vr2_orig.dll"
@@ -381,7 +380,7 @@ class PSVR2Toolkit:
         """返回 (成功, 版本, 下载链接)"""
         try:
             req = urllib.request.Request(PSVR2TOOLKIT_API)
-            req.add_header("User-Agent", "PSVR2Panel/4.1")
+            req.add_header("User-Agent", "PSVR2Panel/4.3")
             with urllib.request.urlopen(req, timeout=10) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
                 self.latest_version = data.get("tag_name", "unknown")
@@ -408,7 +407,7 @@ class PSVR2Toolkit:
             temp_file = temp_dir / DRIVER_TOOLKIT
 
             req = urllib.request.Request(url)
-            req.add_header("User-Agent", "PSVR2Panel/4.1")
+            req.add_header("User-Agent", "PSVR2Panel/4.3")
             with urllib.request.urlopen(req, timeout=60) as resp:
                 total = int(resp.headers.get("Content-Length", 0))
                 downloaded = 0
@@ -1449,14 +1448,14 @@ class PSVR2Panel:
             f"{APP_NAME} v{APP_VERSION}\n\n"
             f"PlayStation VR2 PC 控制面板\n"
             f"深度集成 PSVR2Toolkit 工具链\n\n"
-            f"v4.1.0 更新：\n"
-            f"  🐛 Bug 修复 / 健壮时间戳解析\n"
-            f"  🪶 系统托盘 / 后台监控\n"
-            f"  ⚡ 开机启动注册表开关\n"
-            f"  📜 可滚动界面\n"
-            f"  ⬇️ 一键下载安装 Toolkit\n\n"
+            f"v4.3.0 更新：\n"
+            f"  🐛 PROFILE_DIR 未定义 Bug 修复\n"
+            f"  📦 .gitignore / requirements.txt 规范整理\n"
+            f"  📝 README 添加 Badges 和下载说明\n\n"
+            f"v4.2.0 更新：PlayStation 深色主题 / 驱动切换\n"
+            f"v4.1.0 更新：系统托盘 / 开机启动 / 滚动界面\n\n"
             f"作者: {APP_AUTHOR}\n"
-            f"{GITEE_URL}"
+            f"{GITHUB_URL}"
         )
 
     def run(self):

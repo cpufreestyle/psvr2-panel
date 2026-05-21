@@ -1,4 +1,7 @@
-# PS VR2 PC 控制面板 v4.2.0
+# PS VR2 PC 控制面板 v4.3.0
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![Python Version](https://img.shields.io/badge/Python-3.6+-green.svg)](https://www.python.org/downloads/)
 
 PlayStation VR2 PC 管理工具，一键解锁 PS VR2 在 PC 上的隐藏功能。
 
@@ -21,19 +24,49 @@ PlayStation VR2 PC 管理工具，一键解锁 PS VR2 在 PC 上的隐藏功能�
 
 ## 安装
 
+### 🎯 推荐：直接下载 exe（无需 Python）
+
+前往 [GitHub Releases](https://github.com/cpufreestyle/psvr2-panel/releases) 下载最新版本的 `PSVR2-Panel-v4.3.0.exe`，双击即可运行。
+
+### 💻 从源码运行
+
 ```bash
-git clone https://gitee.com/cpufreestyle/psvr2-panel.git
+git clone https://github.com/cpufreestyle/psvr2-panel.git
 cd psvr2-panel
+pip install -r requirements.txt
 python main.py
 ```
 
-或直接运行 `launch.bat`，或下载 `dist/PSVR2-Panel-v4.2.0.exe` 双击运行。
+或直接运行 `launch.bat`。
+
+## 📸 截图
+
+> 截图待添加（请在 [Issues](https://github.com/cpufreestyle/psvr2-panel/issues) 中提交截图）
 
 ## 系统要求
 
 - Windows 10/11 64位
 - Python 3.6+（exe 版本无需 Python）
 - tkinter（Python 内置）
+
+## v4.3.0 更新
+
+| 类别 | 更新内容 |
+|------|---------|
+| 🐛 Bug | 修复 `PROFILE_DIR` 未定义的致命 Bug |
+| 📦 规范 | 新增 `.gitignore` 完善 / `requirements.txt` 整理 |
+| 📝 文档 | README 添加 Badges、exe 下载链接、截图占位 |
+
+## v4.2.0 更新
+
+| 类别 | 更新内容 |
+|------|---------|
+| 🎨 UI | PlayStation 风格深色主题 UI / 分 Tab 布局 |
+| 🔧 驱动 | PSVR2Toolkit 驱动一键切换 |
+| 💾 备份 | 驱动备份/恢复（时间戳快照） |
+| ⚙️ SteamVR | 渲染缩放/超采样/运动平滑快速设置 |
+| 🚀 启动 | SteamVR / VRCFaceTracking 一键启动 |
+| 🔍 更新 | GitHub 版本检查 |
 
 ## v4.1.0 更新
 
