@@ -1016,9 +1016,6 @@ class PSVR2Panel:
         btn(startup_frame, "VRCFT", self._launch_vrcft, "accent", 9).pack(side="left")
         btn(startup_frame, "VRCFT (Steam)", self._open_vrcft_steam, "gray", 12).pack(side="right")
 
-    def _build_bottom_bar(self):
-        pass  # Replaced by launcher + log sections below
-
     def _build_launcher_section(self):
         section(self.scroll_frame, "🚀 快速启动", C["green"])
         p = self.scroll_frame
@@ -1118,14 +1115,14 @@ class PSVR2Panel:
         if self.detector.connected:
             try:
                 winsound.MessageBeep(winsound.MB_ICONEXCLAMATION)
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning(f"蜂鸣器失败: {e}")
             log.info("🔔 PS VR2 已连接")
         else:
             try:
                 winsound.MessageBeep(winsound.MB_ICONHAND)
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning(f"蜂鸣器失败: {e}")
             log.info("🔔 PS VR2 已断开")
         self._update_ui()
 
@@ -1184,24 +1181,6 @@ class PSVR2Panel:
         else:
             self.install_status_lbl.config(text="❌ 失败", fg=C["red"])
             messagebox.showerror("安装失败", msg)
-
-    def _check_update(self):
-        self.update_lbl.config(text="检查中...", fg=C["text_sub"])
-        self.update_btn.config(state="disabled")
-
-        def check():
-            ok, ver, url = self.detector.toolkit.check_update()
-            self.root.after(0, self._on_update_checked, ok, ver, url)
-
-        threading.Thread(target=check, daemon=True).start()
-
-    def _on_update_checked(self, ok: bool, ver: str, url):
-        self.update_btn.config(state="normal")
-        if ok:
-            self.update_lbl.config(text=ver, fg=C["green"])
-            self.install_status_lbl.config(text=f"v{ver}")
-        else:
-            self.update_lbl.config(text="检查失败", fg=C["red"])
 
     # ── 备份操作 ────────────────────────────────────────
     def _refresh_backup_list(self):
@@ -1438,8 +1417,8 @@ class PSVR2Panel:
         if hasattr(self, "_tray_icon"):
             try:
                 self._tray_icon.stop()
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning(f"托盘图标停止失败: {e}")
         self.root.destroy()
 
     # ── 关于 ────────────────────────────────────────────
