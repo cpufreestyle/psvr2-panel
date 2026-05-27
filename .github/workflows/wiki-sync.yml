@@ -1,0 +1,74 @@
+name: Auto-sync Wiki
+
+on:
+  push:
+    branches: [main]
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  sync-wiki:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate Changelog
+        run: |
+          echo "# 📋 PSVR2 Panel Changelog" > wiki/changelog.md
+          echo "" >> wiki/changelog.md
+          echo "> 自动生成 · $(date '+%Y-%m-%d %H:%M')" >> wiki/changelog.md
+          echo "" >> wiki/changelog.md
+          echo "## 最新发布" >> wiki/changelog.md
+          echo "" >> wiki/changelog.md
+          echo '```' >> wiki/changelog.md
+          git log --oneline -20 --format="• %s (%h) · %ad" --date=short >> wiki/changelog.md
+          echo '```' >> wiki/changelog.md
+          echo "" >> wiki/changelog.md
+          echo "## 版本标签" >> wiki/changelog.md
+          echo "" >> wiki/changelog.md
+          echo '```' >> wiki/changelog.md
+          git tag --sort=-version:refname | head -10 | while read t; do
+            echo "• $t" 
+            git log -1 --format="  %s%n  https://github.com/cpufreestyle/psvr2-panel/commit/$(git rev-list -1 $t)" "$t"
+          done >> wiki/changelog.md
+          echo '```' >> wiki/changelog.md
+          echo "" >> wiki/changelog.md
+          echo "---" >> wiki/changelog.md
+          echo "" >> wiki/changelog.md
+          echo "_由 GitHub Actions 自动生成 · $(date '+%Y-%m-%d %H:%M')_" >> wiki/changelog.md
+
+      - name: Update Index
+        run: |
+          cat > wiki/index.md << 'INDEXEOF'
+          # 📁 PSVR2 Panel Wiki
+
+          > 自动同步 · 最后更新: $(date '+%Y-%m-%d %H:%M')
+
+          ## 项目信息
+
+          - **最新版本**: v4.0.0
+          - **GitHub**: https://github.com/cpufreestyle/psvr2-panel
+          - **构建产物**: dist/PSVR2-Panel-v4.0.0.exe (11.8MB)
+
+          ## 目录
+
+          - [[changelog]] - 版本更新日志
+          - [[architecture]] - 技术架构
+          - [[usage]] - 使用指南
+
+          ## 自动同步
+
+          本目录由 GitHub Actions 自动更新（每次 push）。
+
+          > ⚠️ 手动修改将在下次 push 时被覆盖。
+          INDEXEOF
+
+      - name: Commit & Push
+        run: |
+          git config user.name "GitHub Actions Bot"
+          git config user.email "actions@github.com"
+          git add wiki/
+          git diff --cached --quiet || { echo "No changes"; exit 0; }
+          git commit -m "docs(wiki): auto-sync from GitHub Actions [skip ci]"
+          git push
