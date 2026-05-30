@@ -3,4 +3,4 @@
 
 # 可选依赖
 pystray>=0.19.0   # 系统托盘功能（最小化到托盘）
-Pillow>=9.0.0     # pystray 托盘图标依赖
+Pillow>=12.2.0     # pystray 托盘图标依赖
