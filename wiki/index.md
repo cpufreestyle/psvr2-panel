@@ -4,10 +4,10 @@
 
 ## 📌 项目信息
 
-- **最新版本**: v4.0.0（2026-05-06）
+- **最新版本**: v4.3.0（2026-08-15）
 - **GitHub**: https://github.com/cpufreestyle/psvr2-panel
 - **Gitee**: https://gitee.com/cpufreestyle/psvr2-panel
-- **构建产物**: dist/PSVR2-Panel-v4.0.0.exe (11.8MB)
+- **构建产物**: dist/PSVR2-Panel-v4.3.0.exe
 
 ## 🗂️ 目录
 

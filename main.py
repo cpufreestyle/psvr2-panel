@@ -29,7 +29,7 @@ import winsound
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, List, Tuple
-from auto_updater import AutoUpdater
+from auto_updater import check_update_background
 
 # ============================================================
 # 常量 & 主题
@@ -50,10 +50,16 @@ C = {
     "text": "#ffffff",
     "text_sub": "#8fa4c4",
     "green": "#00c853",
+    "green_hi": "#00e676",
     "red": "#ff1744",
+    "red_hi": "#ff5252",
     "yellow": "#ffd600",
     "orange": "#ff9100",
+    "orange_hi": "#ffab40",
     "teal": "#00bcd4",
+    "teal_hi": "#4dd0e1",
+    "gray": "#5a5a6e",
+    "gray_hi": "#7a7a8e",
 }
 
 # PSVR2Toolkit 路径
@@ -522,7 +528,7 @@ class PSVR2Detector:
 
     def _detect_connection(self):
         r = _run([
-            "powershell", "-Command",
+            "powershell", "-NoProfile", "-NonInteractive", "-Command",
             "Get-PnpDevice | Where-Object {$_.FriendlyName -match 'PlayStation|PSVR|VR2'} | "
             "Select-Object FriendlyName, Status, DeviceID | ConvertTo-Json -Compress"
         ])
@@ -780,7 +786,6 @@ class PSVR2Panel:
         self._build_dashboard()
         self._build_driver_tab()
         self._build_settings_tab()
-        self._build_launcher_section()
         self._build_log_section()
 
     def _build_dashboard(self):
@@ -1016,17 +1021,6 @@ class PSVR2Panel:
         btn(startup_frame, "VRCFT", self._launch_vrcft, "accent", 9).pack(side="left")
         btn(startup_frame, "VRCFT (Steam)", self._open_vrcft_steam, "gray", 12).pack(side="right")
 
-    def _build_launcher_section(self):
-        section(self.scroll_frame, "🚀 快速启动", C["green"])
-        p = self.scroll_frame
-        _, c = card(p, "")
-        btn(c, "🚀 启动 SteamVR + VRCFT", self._launch_all, "green").pack(fill="x", pady=2)
-        sf = tk.Frame(c, bg=C["card"])
-        sf.pack(fill="x", pady=(4, 0))
-        btn(sf, "SteamVR", self._launch_steamvr, "accent", 9).pack(side="left", padx=(0, 4))
-        btn(sf, "VRCFT", self._launch_vrcft, "accent", 9).pack(side="left")
-        btn(sf, "VRCFT (Steam)", self._open_vrcft_steam, "gray", 12).pack(side="right")
-
     def _build_log_section(self):
         section(self.scroll_frame, "📝 日志", C["gray_hi"])
         p = self.scroll_frame
@@ -1076,10 +1070,13 @@ class PSVR2Panel:
         if tk_info.driver_installed:
             self.drv_version_lbl.config(text=tk_info.driver_version,
                                          fg=C["green"] if tk_info.toolkit_active else C["yellow"])
+            bg = C["accent"] if tk_info.toolkit_active else C["orange"]
+            ah = C["accent_hi"] if tk_info.toolkit_active else C["orange_hi"]
             self.drv_switch_btn.config(
                 text="⏪ 恢复官方" if tk_info.toolkit_active else "🔄 切换Toolkit",
-                bg=C["accent"] if tk_info.toolkit_active else C["orange"],
-                activebackground=C["accent_hi"])
+                bg=bg, activebackground=ah)
+            self.drv_switch_btn.bind("<Enter>", lambda e, _b=self.drv_switch_btn, _c=ah: _b.config(bg=_c))
+            self.drv_switch_btn.bind("<Leave>", lambda e, _b=self.drv_switch_btn, _c=bg: _b.config(bg=_c))
             self.drv_dir_lbl.config(text=tk_info.driver_dir or "—")
         else:
             self.drv_version_lbl.config(text="❌ 未安装驱动", fg=C["red"])

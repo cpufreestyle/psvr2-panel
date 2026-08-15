@@ -193,7 +193,7 @@ class AutoUpdater:
             with urllib.request.urlopen(req, timeout=60) as resp:
                 total = int(resp.headers.get('Content-Length', 0))
                 downloaded = 0
-                chunk_size = 8192
+                chunk_size = 65536
 
                 with open(target_path, 'wb') as f:
                     while True:
@@ -236,7 +236,8 @@ class AutoUpdater:
             # 开发模式，使用当前脚本
             current_exe = os.path.abspath(sys.argv[0])
 
-        # 生成更新脚本
+        # 生成更新脚本（f-string 表达式不能含反斜杠，start 命令需预先拼接）
+        start_cmd = "" if self.silent else 'start "" "' + current_exe + '"'
         update_script = f'''@echo off
 echo 正在更新 {self.app_name}...
 timeout /t 2 /nobreak >nul
@@ -250,7 +251,7 @@ if not errorlevel 1 (
 
 copy /y "{new_exe}" "{current_exe}" >nul 2>&1
 echo 更新完成！
-{"start \"\" \"" + current_exe + "\"" if not self.silent else ""}
+{start_cmd}
 rmdir /s /q "{self._download_dir}" >nul 2>&1
 '''
 
@@ -268,7 +269,7 @@ rmdir /s /q "{self._download_dir}" >nul 2>&1
         if callback:
             try:
                 callback()
-            except:
+            except Exception:
                 pass
 
         return True
@@ -278,7 +279,7 @@ rmdir /s /q "{self._download_dir}" >nul 2>&1
             if os.path.exists(self.state_file):
                 with open(self.state_file, 'r') as f:
                     return json.load(f).get(key)
-        except:
+        except (OSError, json.JSONDecodeError):
             pass
         return None
 
@@ -292,7 +293,7 @@ rmdir /s /q "{self._download_dir}" >nul 2>&1
             state[key] = value
             with open(self.state_file, 'w') as f:
                 json.dump(state, f)
-        except:
+        except (OSError, json.JSONDecodeError):
             pass
 
 
