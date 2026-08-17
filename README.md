@@ -1,4 +1,4 @@
-# PS VR2 PC 控制面板 v4.3.0
+# PS VR2 PC 控制面板 v4.4.0
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Python Version](https://img.shields.io/badge/Python-3.6+-green.svg)](https://www.python.org/downloads/)
@@ -20,13 +20,15 @@ PlayStation VR2 PC 管理工具，一键解锁 PS VR2 在 PC 上的隐藏功能�
 - ✅ **系统托盘**（最小化到托盘，后台运行，右键菜单）
 - ✅ **开机启动**（Windows 注册表 Run 项）
 - ✅ **一键安装 PSVR2Toolkit**（自动从 GitHub 下载）
+- ✅ **一键健康检查**（驱动/连接/运行时/备份/自启状态诊断报告，自动复制）
+- ✅ **VRCFT 升级管理**（版本检查 / 一键下载安装包）
 - ✅ 可滚动画布（界面内容再多不被裁剪）
 
 ## 安装
 
 ### 🎯 推荐：直接下载 exe（无需 Python）
 
-前往 [GitHub Releases](https://github.com/cpufreestyle/psvr2-panel/releases) 下载最新版本的 `PSVR2-Panel-v4.3.0.exe`，双击即可运行。
+前往 [GitHub Releases](https://github.com/cpufreestyle/psvr2-panel/releases) 下载最新版本的 `PSVR2-Panel-v4.4.0.exe`，双击即可运行。
 
 ### 💻 从源码运行
 
@@ -48,6 +50,13 @@ python main.py
 - Windows 10/11 64位
 - Python 3.6+（exe 版本无需 Python）
 - tkinter（Python 内置）
+
+## v4.4.0 更新
+
+| 类别 | 更新内容 |
+|------|---------|
+| 🩺 诊断 | 一键健康检查：驱动/连接/运行时/VRCFT/备份/自启/设置文件状态汇总，报告自动复制到剪贴板 |
+| ⬆️ VRCFT | VRCFT 在线升级管理：本地版本读取、GitHub 最新版检查、安装包下载并启动 |
 
 ## v4.3.0 更新
 

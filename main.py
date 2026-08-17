@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-PS VR2 PC 控制面板 — PSVR2 Panel v4.3.0
+PS VR2 PC 控制面板 — PSVR2 Panel v4.4.0
 一键管理 PS VR2 在 PC 上的解锁功能，深度集成 PSVR2Toolkit 工具链
 
-v4.3.0 更新：
-  🐛 Bug 修复：修复 PROFILE_DIR 未定义的致命 Bug
-  📦 规范：.gitignore 完善 / requirements.txt 整理
-  📝 文档：README 添加 Badges、exe 下载链接
+v4.4.0 更新：
+  🩺 新增一键健康检查 / 环境诊断（报告自动复制到剪贴板）
+  ⬆️ 新增 VRCFT 在线升级管理（版本检查 / 下载安装包）
 
 作者: Michael Qiu (cpufreestyle)
 """
@@ -35,7 +34,7 @@ from auto_updater import check_update_background
 # 常量 & 主题
 # ============================================================
 APP_NAME = "PSVR2 Panel"
-APP_VERSION = "4.3.0"
+APP_VERSION = "4.4.0"
 APP_AUTHOR = "Michael Qiu"
 GITEE_URL = "https://gitee.com/cpufreestyle/psvr2-panel"
 GITHUB_URL = "https://github.com/cpufreestyle/psvr2-panel"
@@ -85,6 +84,7 @@ DRIVER_ORIG = "driver_playstation_vr2_orig.dll"
 DRIVER_TOOLKIT = "driver_playstation_vr2_toolkit.dll"
 
 PSVR2TOOLKIT_API = "https://api.github.com/repos/PSVR2Toolkit/PSVR2Toolkit/releases/latest"
+VRCFT_API = "https://api.github.com/repos/benaclejames/VRCFaceTracking/releases/latest"
 VRCFT_STEAM_URL = "steam://store/658580"
 
 
@@ -485,6 +485,62 @@ class VRCFaceTracking:
             return True
         return False
 
+    def get_local_version(self) -> Optional[str]:
+        """读取 VRCFT exe 的文件版本号"""
+        if not self.path:
+            return None
+        r = _run(["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                  f"(Get-Item -LiteralPath '{self.path}').VersionInfo.FileVersion"])
+        if r.returncode == 0 and r.stdout.strip():
+            return r.stdout.strip()
+        return None
+
+    def check_update(self) -> Tuple[bool, str, Optional[str]]:
+        """检查 GitHub 最新 Release，返回 (成功, 版本, 安装包链接)"""
+        try:
+            req = urllib.request.Request(VRCFT_API)
+            req.add_header("User-Agent", "PSVR2Panel/4.4")
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            latest = data.get("tag_name", "unknown")
+            url = None
+            for asset in data.get("assets", []):
+                if asset.get("name", "").lower().endswith(".exe"):
+                    url = asset.get("browser_download_url")
+                    break
+            log.info(f"VRCFT 版本检查完成: {latest}")
+            return True, latest, url
+        except Exception as e:
+            log.warning(f"VRCFT 版本检查失败: {e}")
+            return False, str(e), None
+
+    def download_installer(self, url: str, progress_callback=None) -> Tuple[bool, str]:
+        """下载安装包，成功返回 (True, 本地文件路径)"""
+        try:
+            temp_dir = LOG_DIR / "downloads"
+            temp_dir.mkdir(parents=True, exist_ok=True)
+            name = url.split("/")[-1].split("?")[0] or "VRCFaceTracking_Setup.exe"
+            temp_file = temp_dir / name
+            req = urllib.request.Request(url)
+            req.add_header("User-Agent", "PSVR2Panel/4.4")
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                total = int(resp.headers.get("Content-Length", 0))
+                downloaded = 0
+                with open(temp_file, "wb") as f:
+                    while True:
+                        chunk = resp.read(65536)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if progress_callback and total:
+                            progress_callback(downloaded, total)
+            log.info(f"VRCFT 安装包已下载: {temp_file}")
+            return True, str(temp_file)
+        except Exception as e:
+            log.error(f"VRCFT 安装包下载失败: {e}")
+            return False, f"下载失败: {e}"
+
 
 # ============================================================
 # SteamVR 监控
@@ -855,6 +911,13 @@ class PSVR2Panel:
             lbl.pack(anchor="w")
             self.feat_labels[k] = lbl
 
+        # 健康检查
+        _, hc = card(p, "🩺 健康检查")
+        tk.Label(hc, text="汇总驱动 / 连接 / 运行时 / 备份 / 自启状态，生成诊断报告",
+                 font=("Microsoft YaHei", 8),
+                 fg=C["text_sub"], bg=C["card"]).pack(anchor="w", pady=(0, 6))
+        btn(hc, "🩺 运行诊断", self._run_health_check, "teal", 12).pack(anchor="w")
+
     def _build_driver_tab(self):
         section(self.scroll_frame, "🔧 驱动管理", C["teal"])
         p = self.scroll_frame
@@ -1021,6 +1084,34 @@ class PSVR2Panel:
         btn(startup_frame, "VRCFT", self._launch_vrcft, "accent", 9).pack(side="left")
         btn(startup_frame, "VRCFT (Steam)", self._open_vrcft_steam, "gray", 12).pack(side="right")
 
+        # VRCFT 升级
+        _, c4 = card(p, "⬆️ VRCFT 升级")
+        ver_row = tk.Frame(c4, bg=C["card"])
+        ver_row.pack(fill="x")
+        tk.Label(ver_row, text="本地版本:", font=("Microsoft YaHei", 9),
+                 fg=C["text_sub"], bg=C["card"]).pack(side="left")
+        self.vrcft_local_lbl = tk.Label(ver_row, text="—",
+                                        font=("Microsoft YaHei", 9, "bold"),
+                                        fg=C["text"], bg=C["card"])
+        self.vrcft_local_lbl.pack(side="left", padx=(6, 12))
+        tk.Label(ver_row, text="最新版本:", font=("Microsoft YaHei", 9),
+                 fg=C["text_sub"], bg=C["card"]).pack(side="left")
+        self.vrcft_latest_lbl = tk.Label(ver_row, text="未检查",
+                                         font=("Microsoft YaHei", 9, "bold"),
+                                         fg=C["text"], bg=C["card"])
+        self.vrcft_latest_lbl.pack(side="left", padx=(6, 0))
+        btn(ver_row, "🔍 检查", self._check_vrcft_update, "accent", 8).pack(side="right")
+        dl_row = tk.Frame(c4, bg=C["card"])
+        dl_row.pack(fill="x", pady=(6, 0))
+        self.vrcft_install_btn = btn(dl_row, "⬇️ 下载安装包", self._install_vrcft,
+                                     "green", 14)
+        self.vrcft_install_btn.pack(side="left", padx=(0, 6))
+        self.vrcft_install_btn.config(state="disabled")
+        self.vrcft_status_lbl = tk.Label(dl_row, text="先检查更新",
+                                         font=("Microsoft YaHei", 8),
+                                         fg=C["text_sub"], bg=C["card"])
+        self.vrcft_status_lbl.pack(side="left", fill="x", expand=True)
+
     def _build_log_section(self):
         section(self.scroll_frame, "📝 日志", C["gray_hi"])
         p = self.scroll_frame
@@ -1122,6 +1213,52 @@ class PSVR2Panel:
                 log.warning(f"蜂鸣器失败: {e}")
             log.info("🔔 PS VR2 已断开")
         self._update_ui()
+
+    # ── 健康检查 ────────────────────────────────────────
+    def _run_health_check(self):
+        def diagnose():
+            self.detector.detect_all()
+            lines = []
+            tk = self.detector.toolkit
+            if tk.driver_installed:
+                lines.append(("✅", f"驱动目录: {tk.driver_dir}"))
+                lines.append(("✅" if tk.toolkit_active else "⚠️",
+                              f"当前驱动: {tk.driver_version}"))
+            else:
+                lines.append(("❌", "驱动目录: 未找到（PlayStation VR2 App 未安装？）"))
+            if self.detector.connected:
+                name = self.detector.device_info.get("name", "PS VR2")
+                lines.append(("✅", f"PS VR2 连接: 已连接（{name}）"))
+            else:
+                lines.append(("❌", "PS VR2 连接: 未检测到"))
+            lines.append(("✅" if self.detector.steamvr.is_running else "⚠️",
+                          "SteamVR: 运行中" if self.detector.steamvr.is_running
+                          else "SteamVR: 未运行"))
+            vrcft = self.detector.vrcft
+            if vrcft.installed:
+                lines.append(("✅", f"VRCFT: 已安装（{vrcft.path}）"))
+            else:
+                lines.append(("❌", "VRCFT: 未安装"))
+            n = len(tk.list_backups())
+            lines.append(("✅" if n else "⚠️", f"驱动备份: {n} 份"))
+            lines.append(("ℹ️", f"开机自启: {'开启' if auto_start_enabled() else '关闭'}"))
+            if self.sv_settings.load():
+                lines.append(("✅", f"SteamVR 设置: {self.sv_settings.path}"))
+            else:
+                lines.append(("❌", "SteamVR 设置: 文件未找到"))
+            self.root.after(0, self._show_health_report, lines)
+        threading.Thread(target=diagnose, daemon=True).start()
+
+    def _show_health_report(self, lines):
+        sep = "=" * 32
+        report = "\n".join(f"{icon} {text}" for icon, text in lines)
+        report = f"🩺 健康检查报告\n{sep}\n{report}\n{sep}"
+        self.root.clipboard_clear()
+        self.root.clipboard_append(report)
+        log.info("健康检查完成:\n" + report)
+        messagebox.showinfo("健康检查", report +
+                            f"\n\n生成时间: {datetime.now():%Y-%m-%d %H:%M:%S}"
+                            "\n\n📋 报告已复制到剪贴板")
 
     # ── 驱动操作 ────────────────────────────────────────
     def _switch_driver(self):
@@ -1369,6 +1506,58 @@ class PSVR2Panel:
         except Exception:
             os.startfile("https://store.steampowered.com/app/658580/VRCFaceTracking/")
 
+    # ── VRCFT 升级 ──────────────────────────────────────
+    def _check_vrcft_update(self):
+        def do_check():
+            vrcft = self.detector.vrcft
+            local = vrcft.get_local_version()
+            ok, latest, url = vrcft.check_update()
+            self.root.after(0, self._on_vrcft_check, local, ok, latest, url)
+        threading.Thread(target=do_check, daemon=True).start()
+
+    def _on_vrcft_check(self, local: Optional[str], ok: bool,
+                        latest: str, url: Optional[str]):
+        self.vrcft_local_lbl.config(text=local or "未知")
+        if ok:
+            self.vrcft_latest_lbl.config(text=latest, fg=C["green"])
+            self._vrcft_dl_url = url
+            if url:
+                self.vrcft_install_btn.config(state="normal")
+                self.vrcft_status_lbl.config(text="可下载", fg=C["text_sub"])
+            else:
+                self.vrcft_status_lbl.config(text="Release 未提供 exe 安装包",
+                                             fg=C["yellow"])
+        else:
+            self.vrcft_latest_lbl.config(text="检查失败", fg=C["red"])
+            self.vrcft_status_lbl.config(text="网络错误，稍后重试", fg=C["red"])
+
+    def _install_vrcft(self):
+        url = getattr(self, "_vrcft_dl_url", None)
+        if not url:
+            return
+        self.vrcft_install_btn.config(state="disabled")
+        self.vrcft_status_lbl.config(text="正在下载...", fg=C["text_sub"])
+
+        def do_install():
+            progress_cb = lambda d, t: self.root.after(0, self._on_vrcft_progress, d, t)
+            ok, result = self.detector.vrcft.download_installer(url, progress_cb)
+            self.root.after(0, self._on_vrcft_install_done, ok, result)
+        threading.Thread(target=do_install, daemon=True).start()
+
+    def _on_vrcft_progress(self, downloaded: int, total: int):
+        pct = int(downloaded * 100 / total) if total else 0
+        self.vrcft_status_lbl.config(text=f"下载中... {pct}%", fg=C["accent"])
+
+    def _on_vrcft_install_done(self, ok: bool, result: str):
+        self.vrcft_install_btn.config(state="normal")
+        if ok:
+            self.vrcft_status_lbl.config(text="✅ 下载完成，启动安装程序", fg=C["green"])
+            _popen([result])
+            log.info(f"VRCFT 安装程序已启动: {result}")
+        else:
+            self.vrcft_status_lbl.config(text=f"❌ {result}", fg=C["red"])
+            messagebox.showerror("VRCFT 升级", result)
+
     # ── 窗口关闭/托盘 ────────────────────────────────────
     def _on_close_request(self):
         if self.minimize_tray_var.get():
@@ -1425,10 +1614,10 @@ class PSVR2Panel:
             f"{APP_NAME} v{APP_VERSION}\n\n"
             f"PlayStation VR2 PC 控制面板\n"
             f"深度集成 PSVR2Toolkit 工具链\n\n"
-            f"v4.3.0 更新：\n"
-            f"  🐛 PROFILE_DIR 未定义 Bug 修复\n"
-            f"  📦 .gitignore / requirements.txt 规范整理\n"
-            f"  📝 README 添加 Badges 和下载说明\n\n"
+            f"v4.4.0 更新：\n"
+            f"  🩺 一键健康检查 / 环境诊断\n"
+            f"  ⬆️ VRCFT 在线升级管理\n\n"
+            f"v4.3.0 更新：PROFILE_DIR Bug 修复 / 规范整理\n"
             f"v4.2.0 更新：PlayStation 深色主题 / 驱动切换\n"
             f"v4.1.0 更新：系统托盘 / 开机启动 / 滚动界面\n\n"
             f"作者: {APP_AUTHOR}\n"
