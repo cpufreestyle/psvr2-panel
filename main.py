@@ -387,7 +387,7 @@ class PSVR2Toolkit:
         """返回 (成功, 版本, 下载链接)"""
         try:
             req = urllib.request.Request(PSVR2TOOLKIT_API)
-            req.add_header("User-Agent", "PSVR2Panel/4.3")
+            req.add_header("User-Agent", "PSVR2Panel/4.4")
             with urllib.request.urlopen(req, timeout=10) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
                 self.latest_version = data.get("tag_name", "unknown")
@@ -414,7 +414,7 @@ class PSVR2Toolkit:
             temp_file = temp_dir / DRIVER_TOOLKIT
 
             req = urllib.request.Request(url)
-            req.add_header("User-Agent", "PSVR2Panel/4.3")
+            req.add_header("User-Agent", "PSVR2Panel/4.4")
             with urllib.request.urlopen(req, timeout=60) as resp:
                 total = int(resp.headers.get("Content-Length", 0))
                 downloaded = 0
@@ -767,8 +767,6 @@ class PSVR2Panel:
         self.detector = PSVR2Detector()
         self.sv_settings = SteamVRSettings()
         self._stop_monitor = threading.Event()
-        self._last_connected: Optional[bool] = None
-        self._tray_installed = False
 
         self.root = tk.Tk()
         self.root.title(f"{APP_NAME} v{APP_VERSION}")
@@ -812,8 +810,9 @@ class PSVR2Panel:
                  font=("Microsoft YaHei", 10),
                  fg=C["text_sub"], bg=C["bg"]).pack(side="left", padx=(8, 0))
 
-        # 刷新按钮
+        # 刷新 + 关于按钮
         btn(header, "🔄", self._run_detection, "gray").pack(side="right")
+        btn(header, "ℹ️", self._show_about, "gray").pack(side="right", padx=(0, 4))
 
         # 可滚动画布
         canvas = tk.Canvas(self.root, bg=C["bg"],
@@ -971,7 +970,7 @@ class PSVR2Panel:
                                     font=("Microsoft YaHei", 9, "bold"),
                                     fg=C["text"], bg=C["card"])
         self.update_lbl.pack(side="left", padx=(6, 0))
-        self.update_btn = btn(ver_frame, "🔍 检查", self._check_update, "accent", 8)
+        self.update_btn = btn(ver_frame, "🔍 检查", self._check_toolkit_update, "accent", 8)
         self.update_btn.pack(side="right")
 
         # 备份管理
@@ -1496,9 +1495,11 @@ class PSVR2Panel:
                 "VRCFaceTracking 未安装\n可点击「VRCFT (Steam)」安装")
 
     def _launch_all(self):
-        self._launch_steamvr()
-        time.sleep(2)
-        self._launch_vrcft()
+        def do_launch():
+            self._launch_steamvr()
+            time.sleep(2)
+            self._launch_vrcft()
+        threading.Thread(target=do_launch, daemon=True).start()
 
     def _open_vrcft_steam(self):
         try:
@@ -1624,7 +1625,33 @@ class PSVR2Panel:
             f"{GITHUB_URL}"
         )
 
-    def _check_update(self):
+    def _check_toolkit_update(self):
+        """检查 PSVR2Toolkit 最新版本"""
+        self.update_btn.config(state="disabled")
+        self.update_lbl.config(text="检查中...", fg=C["text_sub"])
+
+        def do_check():
+            ok, ver, url = self.detector.toolkit.check_update()
+            self.root.after(0, self._on_toolkit_check, ok, ver, url)
+        threading.Thread(target=do_check, daemon=True).start()
+
+    def _on_toolkit_check(self, ok: bool, ver: str, url: Optional[str]):
+        self.update_btn.config(state="normal")
+        if ok:
+            self.update_lbl.config(text=ver, fg=C["green"])
+            if url:
+                messagebox.showinfo("版本检查",
+                    f"PSVR2Toolkit 最新版本: {ver}\n\n"
+                    "可点击「⬇️ 下载安装」进行更新")
+            else:
+                messagebox.showinfo("版本检查",
+                    f"PSVR2Toolkit 最新版本: {ver}\n\n"
+                    "Release 未提供 DLL 下载")
+        else:
+            self.update_lbl.config(text="检查失败", fg=C["red"])
+            messagebox.showwarning("版本检查", f"检查失败: {ver}")
+
+    def _check_app_update(self):
         """后台检查更新"""
         def _on_update(new_ver, updater):
             changelog = updater.get_changelog()
@@ -1648,7 +1675,7 @@ class PSVR2Panel:
         )
 
     def run(self):
-        self.root.after(2000, self._check_update)
+        self.root.after(2000, self._check_app_update)
         self.root.mainloop()
 
 

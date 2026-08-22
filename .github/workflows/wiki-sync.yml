@@ -40,16 +40,17 @@ jobs:
 
       - name: Update Index
         run: |
-          cat > wiki/index.md << 'INDEXEOF'
+          LATEST_TAG=$(git tag --sort=-version:refname | head -1 || echo "v4.4.0")
+          cat > wiki/index.md << INDEXEOF
           # 📁 PSVR2 Panel Wiki
 
           > 自动同步 · 最后更新: $(date '+%Y-%m-%d %H:%M')
 
           ## 项目信息
 
-          - **最新版本**: v4.0.0
+          - **最新版本**: ${LATEST_TAG:-v4.4.0}
           - **GitHub**: https://github.com/cpufreestyle/psvr2-panel
-          - **构建产物**: dist/PSVR2-Panel-v4.0.0.exe (11.8MB)
+          - **构建产物**: dist/PSVR2-Panel-${LATEST_TAG:-v4.4.0}.exe
 
           ## 目录
 
