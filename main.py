@@ -304,9 +304,10 @@ class PSVR2Toolkit:
                 os.rename(op, dp)
                 self.toolkit_active = False
                 self.driver_version = "官方驱动"
+                log.info("已切换回官方驱动")
                 return True, "已切换回官方驱动"
             if os.path.exists(tp):
-                os.rename(dp, DRIVER_DLL + ".bak")
+                os.rename(dp, os.path.join(self.driver_dir, DRIVER_DLL + ".bak"))
                 os.rename(tp, dp)
                 self.toolkit_active = False
                 self.driver_version = "官方驱动"
@@ -360,12 +361,15 @@ class PSVR2Toolkit:
         if not src.exists():
             return False, f"备份不存在：{ts}"
         dp = os.path.join(self.driver_dir, DRIVER_DLL)
+        pre_restore = os.path.join(self.driver_dir, DRIVER_DLL + ".pre_restore")
         if os.path.exists(dp):
-            os.rename(dp, os.path.join(self.driver_dir, DRIVER_DLL + ".pre_restore"))
+            os.rename(dp, pre_restore)
         for fname in [DRIVER_DLL, DRIVER_ORIG, DRIVER_TOOLKIT]:
             s = src / fname
             if s.exists():
                 shutil.copy2(s, os.path.join(self.driver_dir, fname))
+        if os.path.exists(pre_restore):
+            os.remove(pre_restore)
         info_file = src / "backup_info.json"
         if info_file.exists():
             with open(info_file, "r", encoding="utf-8") as f:
@@ -1472,27 +1476,31 @@ class PSVR2Panel:
 
     # ── 启动操作 ────────────────────────────────────────
     def _launch_steamvr(self):
-        for p in STEAMVR_PATHS:
-            if os.path.exists(p):
-                _popen([p])
-                log.info("SteamVR 已启动")
+        def do_launch():
+            for p in STEAMVR_PATHS:
+                if os.path.exists(p):
+                    _popen([p])
+                    log.info("SteamVR 已启动")
+                    time.sleep(1)
+                    self._run_detection()
+                    return
+            try:
+                os.startfile("steam://rungameid/250820")
                 time.sleep(1)
                 self._run_detection()
-                return
-        try:
-            os.startfile("steam://rungameid/250820")
-            time.sleep(1)
-            self._run_detection()
-        except Exception:
-            messagebox.showwarning("未找到", "SteamVR 未安装")
+            except Exception:
+                self.root.after(0, lambda: messagebox.showwarning("未找到", "SteamVR 未安装"))
+        threading.Thread(target=do_launch, daemon=True).start()
 
     def _launch_vrcft(self):
-        if self.detector.vrcft.launch():
-            time.sleep(1)
-            self._run_detection()
-        else:
-            messagebox.showwarning("未安装",
-                "VRCFaceTracking 未安装\n可点击「VRCFT (Steam)」安装")
+        def do_launch():
+            if self.detector.vrcft.launch():
+                time.sleep(1)
+                self._run_detection()
+            else:
+                self.root.after(0, lambda: messagebox.showwarning("未安装",
+                    "VRCFaceTracking 未安装\n可点击「VRCFT (Steam)」安装"))
+        threading.Thread(target=do_launch, daemon=True).start()
 
     def _launch_all(self):
         def do_launch():
