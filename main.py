@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-PS VR2 PC 控制面板 — PSVR2 Panel v4.4.0
+PS VR2 PC 控制面板 — PSVR2 Panel v4.5.0
 一键管理 PS VR2 在 PC 上的解锁功能，深度集成 PSVR2Toolkit 工具链
 
-v4.4.0 更新：
-  🩺 新增一键健康检查 / 环境诊断（报告自动复制到剪贴板）
-  ⬆️ 新增 VRCFT 在线升级管理（版本检查 / 下载安装包）
+v4.5.0 更新：
+  ⏹ 新增一键关闭 SteamVR（配合驱动切换工作流）
+  🛡 驱动切换/备份/恢复支持文件占用容错（SteamVR 运行中给出友好提示）
+  🧹 驱动备份自动清理（保留最近 5 份）
+  ⚡ 监控降载：连接检测降至约 20 秒一次，进程检测保持 3 秒
 
 作者: Michael Qiu (cpufreestyle)
 """
@@ -34,7 +36,7 @@ from auto_updater import check_update_background
 # 常量 & 主题
 # ============================================================
 APP_NAME = "PSVR2 Panel"
-APP_VERSION = "4.4.0"
+APP_VERSION = "4.5.0"
 APP_AUTHOR = "Michael Qiu"
 GITEE_URL = "https://gitee.com/cpufreestyle/psvr2-panel"
 GITHUB_URL = "https://github.com/cpufreestyle/psvr2-panel"
@@ -76,6 +78,7 @@ VRCFT_PATHS = [
 ]
 VRCFT_DEPLOY = Path.home() / "AppData" / "Local" / "PSVR2Panel" / "VRCFaceTracking"
 BACKUP_DIR = Path.home() / "AppData" / "Local" / "PSVR2Panel" / "backups"
+BACKUP_KEEP = 5  # 驱动备份自动保留份数
 LOG_DIR = Path.home() / "AppData" / "Local" / "PSVR2Panel" / "logs"
 PROFILE_DIR = Path.home() / "AppData" / "Local" / "PSVR2Panel" / "profiles"
 
@@ -265,6 +268,13 @@ class PSVR2Toolkit:
     def switch(self, to_toolkit: bool) -> Tuple[bool, str]:
         if not self.driver_dir:
             return False, "未找到驱动目录"
+        try:
+            return self._switch_impl(to_toolkit)
+        except OSError as e:
+            log.error(f"驱动切换失败: {e}")
+            return False, "驱动文件被占用，请先关闭 SteamVR 后重试"
+
+    def _switch_impl(self, to_toolkit: bool) -> Tuple[bool, str]:
         dp = os.path.join(self.driver_dir, DRIVER_DLL)
         op = os.path.join(self.driver_dir, DRIVER_ORIG)
         tp = os.path.join(self.driver_dir, DRIVER_TOOLKIT)
@@ -323,11 +333,16 @@ class PSVR2Toolkit:
         dst = BACKUP_DIR / ts
         dst.mkdir(parents=True, exist_ok=True)
         copied = []
-        for fname in [DRIVER_DLL, DRIVER_ORIG, DRIVER_TOOLKIT]:
-            src = os.path.join(self.driver_dir, fname)
-            if os.path.exists(src):
-                shutil.copy2(src, dst / fname)
-                copied.append(fname)
+        try:
+            for fname in [DRIVER_DLL, DRIVER_ORIG, DRIVER_TOOLKIT]:
+                src = os.path.join(self.driver_dir, fname)
+                if os.path.exists(src):
+                    shutil.copy2(src, dst / fname)
+                    copied.append(fname)
+        except OSError as e:
+            shutil.rmtree(dst, ignore_errors=True)
+            log.error(f"备份失败: {e}")
+            return False, "备份失败：驱动文件被占用，请先关闭 SteamVR"
         info = {
             "timestamp": ts,
             "active": "toolkit" if self.toolkit_active else "official",
@@ -338,7 +353,25 @@ class PSVR2Toolkit:
         with open(dst / "backup_info.json", "w", encoding="utf-8") as f:
             json.dump(info, f, ensure_ascii=False, indent=2)
         log.info(f"驱动备份已创建: {ts} ({len(copied)} 个文件)")
+        self.cleanup_backups()
         return True, f"备份已创建：{ts} ({len(copied)} 个文件)"
+
+    def cleanup_backups(self, keep: int = BACKUP_KEEP) -> int:
+        """保留最近 keep 份备份，删除更旧的，返回删除数量"""
+        if not BACKUP_DIR.exists():
+            return 0
+        removed = 0
+        dirs = sorted((d for d in BACKUP_DIR.iterdir() if d.is_dir()),
+                      key=lambda p: p.name, reverse=True)
+        for d in dirs[keep:]:
+            try:
+                shutil.rmtree(d)
+                removed += 1
+            except OSError as e:
+                log.warning(f"清理备份失败: {d.name}: {e}")
+        if removed:
+            log.info(f"已自动清理 {removed} 份旧备份")
+        return removed
 
     def list_backups(self) -> List[Dict]:
         backups = []
@@ -364,10 +397,16 @@ class PSVR2Toolkit:
         pre_restore = os.path.join(self.driver_dir, DRIVER_DLL + ".pre_restore")
         if os.path.exists(dp):
             os.rename(dp, pre_restore)
-        for fname in [DRIVER_DLL, DRIVER_ORIG, DRIVER_TOOLKIT]:
-            s = src / fname
-            if s.exists():
-                shutil.copy2(s, os.path.join(self.driver_dir, fname))
+        try:
+            for fname in [DRIVER_DLL, DRIVER_ORIG, DRIVER_TOOLKIT]:
+                s = src / fname
+                if s.exists():
+                    shutil.copy2(s, os.path.join(self.driver_dir, fname))
+        except OSError as e:
+            if os.path.exists(pre_restore) and not os.path.exists(dp):
+                os.rename(pre_restore, dp)
+            log.error(f"恢复失败: {e}")
+            return False, "恢复失败：驱动文件被占用，请先关闭 SteamVR"
         if os.path.exists(pre_restore):
             os.remove(pre_restore)
         info_file = src / "backup_info.json"
@@ -391,7 +430,7 @@ class PSVR2Toolkit:
         """返回 (成功, 版本, 下载链接)"""
         try:
             req = urllib.request.Request(PSVR2TOOLKIT_API)
-            req.add_header("User-Agent", "PSVR2Panel/4.4")
+            req.add_header("User-Agent", "PSVR2Panel/4.5")
             with urllib.request.urlopen(req, timeout=10) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
                 self.latest_version = data.get("tag_name", "unknown")
@@ -418,7 +457,7 @@ class PSVR2Toolkit:
             temp_file = temp_dir / DRIVER_TOOLKIT
 
             req = urllib.request.Request(url)
-            req.add_header("User-Agent", "PSVR2Panel/4.4")
+            req.add_header("User-Agent", "PSVR2Panel/4.5")
             with urllib.request.urlopen(req, timeout=60) as resp:
                 total = int(resp.headers.get("Content-Length", 0))
                 downloaded = 0
@@ -503,7 +542,7 @@ class VRCFaceTracking:
         """检查 GitHub 最新 Release，返回 (成功, 版本, 安装包链接)"""
         try:
             req = urllib.request.Request(VRCFT_API)
-            req.add_header("User-Agent", "PSVR2Panel/4.4")
+            req.add_header("User-Agent", "PSVR2Panel/4.5")
             with urllib.request.urlopen(req, timeout=10) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
             latest = data.get("tag_name", "unknown")
@@ -526,7 +565,7 @@ class VRCFaceTracking:
             name = url.split("/")[-1].split("?")[0] or "VRCFaceTracking_Setup.exe"
             temp_file = temp_dir / name
             req = urllib.request.Request(url)
-            req.add_header("User-Agent", "PSVR2Panel/4.4")
+            req.add_header("User-Agent", "PSVR2Panel/4.5")
             with urllib.request.urlopen(req, timeout=60) as resp:
                 total = int(resp.headers.get("Content-Length", 0))
                 downloaded = 0
@@ -979,6 +1018,9 @@ class PSVR2Panel:
 
         # 备份管理
         _, c = card(p, "💾 驱动备份")
+        tk.Label(c, text=f"自动保留最近 {BACKUP_KEEP} 份，超出自动清理",
+                 font=("Microsoft YaHei", 8),
+                 fg=C["text_sub"], bg=C["card"]).pack(anchor="w", pady=(0, 4))
         self.backup_listbox = tk.Listbox(c, font=("Microsoft YaHei", 9),
                                           bg=C["card_hi"], fg=C["text"],
                                           selectbackground=C["accent"],
@@ -1086,6 +1128,9 @@ class PSVR2Panel:
         btn(startup_frame, "SteamVR", self._launch_steamvr, "accent", 9).pack(side="left", padx=(0, 4))
         btn(startup_frame, "VRCFT", self._launch_vrcft, "accent", 9).pack(side="left")
         btn(startup_frame, "VRCFT (Steam)", self._open_vrcft_steam, "gray", 12).pack(side="right")
+        stop_frame = tk.Frame(c3, bg=C["card"])
+        stop_frame.pack(fill="x", pady=(4, 0))
+        btn(stop_frame, "⏹ 关闭 SteamVR", self._stop_steamvr, "red", 14).pack(anchor="w")
 
         # VRCFT 升级
         _, c4 = card(p, "⬆️ VRCFT 升级")
@@ -1179,10 +1224,16 @@ class PSVR2Panel:
 
     def _start_monitor(self):
         def loop():
+            conn_ticks = 0
             while not self._stop_monitor.wait(3):
                 self.detector.refresh_runtime()
-                if self.detector.refresh_connection():
-                    self.root.after(0, self._on_connection_changed)
+                # 连接检测需启动 PowerShell（开销大），降频至约 20 秒一次
+                conn_ticks += 1
+                if conn_ticks >= 7:
+                    conn_ticks = 0
+                    if self.detector.refresh_connection():
+                        self.root.after(0, self._on_connection_changed)
+                    self.root.after(0, self._update_ui)
                 self.root.after(0, self._update_runtime_ui)
         t = threading.Thread(target=loop, daemon=True)
         t.start()
@@ -1268,6 +1319,11 @@ class PSVR2Panel:
         tk_info = self.detector.toolkit
         to_toolkit = not tk_info.toolkit_active
         action = "切换到 PSVR2Toolkit" if to_toolkit else "切换回官方驱动"
+        if self.detector.steamvr.is_running:
+            if not messagebox.askyesno("SteamVR 运行中",
+                    "SteamVR 正在运行，驱动文件可能被占用导致切换失败。\n\n"
+                    "建议先点击「⏹ 关闭 SteamVR」。\n\n仍要继续切换吗？"):
+                return
         confirm = messagebox.askyesno("确认", f"{action}？\n\n需要重启 SteamVR 生效")
         if not confirm:
             return
@@ -1476,44 +1532,64 @@ class PSVR2Panel:
 
     # ── 启动操作 ────────────────────────────────────────
     def _launch_steamvr(self):
-        def do_launch():
-            for p in STEAMVR_PATHS:
-                if os.path.exists(p):
-                    _popen([p])
-                    log.info("SteamVR 已启动")
-                    time.sleep(1)
-                    self._run_detection()
-                    return
-            try:
-                os.startfile("steam://rungameid/250820")
+        threading.Thread(target=self._do_launch_steamvr, daemon=True).start()
+
+    def _do_launch_steamvr(self):
+        for p in STEAMVR_PATHS:
+            if os.path.exists(p):
+                _popen([p])
+                log.info("SteamVR 已启动")
                 time.sleep(1)
                 self._run_detection()
-            except Exception:
-                self.root.after(0, lambda: messagebox.showwarning("未找到", "SteamVR 未安装"))
-        threading.Thread(target=do_launch, daemon=True).start()
+                return
+        try:
+            os.startfile("steam://rungameid/250820")
+            time.sleep(1)
+            self._run_detection()
+        except Exception:
+            self.root.after(0, lambda: messagebox.showwarning("未找到", "SteamVR 未安装"))
 
     def _launch_vrcft(self):
-        def do_launch():
-            if self.detector.vrcft.launch():
-                time.sleep(1)
-                self._run_detection()
-            else:
-                self.root.after(0, lambda: messagebox.showwarning("未安装",
-                    "VRCFaceTracking 未安装\n可点击「VRCFT (Steam)」安装"))
-        threading.Thread(target=do_launch, daemon=True).start()
+        threading.Thread(target=self._do_launch_vrcft, daemon=True).start()
+
+    def _do_launch_vrcft(self):
+        if self.detector.vrcft.launch():
+            time.sleep(1)
+            self._run_detection()
+        else:
+            self.root.after(0, lambda: messagebox.showwarning("未安装",
+                "VRCFaceTracking 未安装\n可点击「VRCFT (Steam)」安装"))
 
     def _launch_all(self):
-        def do_launch():
-            self._launch_steamvr()
-            time.sleep(2)
-            self._launch_vrcft()
-        threading.Thread(target=do_launch, daemon=True).start()
+        threading.Thread(target=self._do_launch_all, daemon=True).start()
+
+    def _do_launch_all(self):
+        self._do_launch_steamvr()
+        time.sleep(2)
+        self._do_launch_vrcft()
 
     def _open_vrcft_steam(self):
         try:
             os.startfile(VRCFT_STEAM_URL)
         except Exception:
             os.startfile("https://store.steampowered.com/app/658580/VRCFaceTracking/")
+
+    def _stop_steamvr(self):
+        def do_stop():
+            r = _run(["taskkill", "/F", "/IM", "vrserver.exe"], timeout=10)
+            closed = r.returncode == 0
+            if closed:
+                log.info("SteamVR 已关闭")
+                time.sleep(1)
+            self.root.after(0, self._on_steamvr_stopped, closed)
+        threading.Thread(target=do_stop, daemon=True).start()
+
+    def _on_steamvr_stopped(self, closed: bool):
+        self._run_detection()
+        if closed:
+            messagebox.showinfo("提示", "SteamVR 已关闭\n\n现在可以安全切换驱动")
+        else:
+            messagebox.showwarning("提示", "SteamVR 未在运行或关闭失败")
 
     # ── VRCFT 升级 ──────────────────────────────────────
     def _check_vrcft_update(self):
@@ -1623,9 +1699,11 @@ class PSVR2Panel:
             f"{APP_NAME} v{APP_VERSION}\n\n"
             f"PlayStation VR2 PC 控制面板\n"
             f"深度集成 PSVR2Toolkit 工具链\n\n"
-            f"v4.4.0 更新：\n"
-            f"  🩺 一键健康检查 / 环境诊断\n"
-            f"  ⬆️ VRCFT 在线升级管理\n\n"
+            f"v4.5.0 更新：\n"
+            f"  ⏹ 一键关闭 SteamVR / 切换前置检查\n"
+            f"  🛡 驱动操作文件占用容错\n"
+            f"  🧹 备份自动清理（保留最近 5 份）\n\n"
+            f"v4.4.0 更新：健康检查 / VRCFT 升级管理\n"
             f"v4.3.0 更新：PROFILE_DIR Bug 修复 / 规范整理\n"
             f"v4.2.0 更新：PlayStation 深色主题 / 驱动切换\n"
             f"v4.1.0 更新：系统托盘 / 开机启动 / 滚动界面\n\n"
