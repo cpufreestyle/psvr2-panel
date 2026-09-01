@@ -1,4 +1,4 @@
-# PS VR2 PC 控制面板 v4.5.0
+# PS VR2 PC 控制面板 v4.6.0
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Python Version](https://img.shields.io/badge/Python-3.6+-green.svg)](https://www.python.org/downloads/)
@@ -25,13 +25,15 @@ PlayStation VR2 PC 管理工具，一键解锁 PS VR2 在 PC 上的隐藏功能�
 - ✅ **备份自动清理**（自动保留最近 5 份）
 - ✅ **一键健康检查**（驱动/连接/运行时/备份/自启状态诊断报告，自动复制）
 - ✅ **VRCFT 升级管理**（版本检查 / 一键下载安装包）
+- ✅ **VRCFT 眼动模块一键部署**（PSVR2Toolkit.VRCFT，用于 VRChat 眼动追踪）
+- ✅ **Steam 路径自动检测**（注册表 + 多库扫描，告别硬编码盘符）
 - ✅ 可滚动画布（界面内容再多不被裁剪）
 
 ## 安装
 
 ### 🎯 推荐：直接下载 exe（无需 Python）
 
-前往 [GitHub Releases](https://github.com/cpufreestyle/psvr2-panel/releases) 下载最新版本的 `PSVR2-Panel-v4.5.0.exe`，双击即可运行。
+前往 [GitHub Releases](https://github.com/cpufreestyle/psvr2-panel/releases) 下载最新版本的 `PSVR2-Panel-v4.6.0.exe`，双击即可运行。
 
 ### 💻 从源码运行
 
@@ -53,6 +55,16 @@ python main.py
 - Windows 10/11 64位
 - Python 3.6+（exe 版本无需 Python）
 - tkinter（Python 内置）
+
+## v4.6.0 更新
+
+| 类别 | 更新内容 |
+|------|---------|
+| 🐛 Bug | 修复 PSVR2Toolkit API 地址失效（仓库已迁移至 BnuuySolutions/PSVR2Toolkit），版本检查与一键安装恢复可用 |
+| 🧩 模块 | 新增 VRCFT 眼动模块一键下载部署（BnuuySolutions/PSVR2Toolkit.VRCFT），模块安装状态实时显示 |
+| 📂 检测 | Steam 路径注册表自动检测（HKLM InstallPath + libraryfolders.vdf 多库扫描，保留硬编码回退） |
+| 🍱 托盘 | 托盘菜单新增切换驱动 / 关闭 SteamVR / 健康检查快捷项 |
+| 🩺 诊断 | 健康检查新增 VRCFT 眼动模块状态与 Toolkit 最新版本信息 |
 
 ## v4.5.0 更新
 
@@ -114,9 +126,9 @@ python main.py
 
 要解锁眼动追踪、头显震动、HDR 等功能，需要安装 PSVR2Toolkit：
 
-https://github.com/PSVR2Toolkit
+https://github.com/BnuuySolutions/PSVR2Toolkit
 
-PSVR2Toolkit 是开源项目，免费使用，由 `tinybnuuy` 等开发者历时 5 个月破解。
+PSVR2Toolkit 是开源项目（Bnuuy Solutions），免费使用，由 `meowybnuuy` 等开发者破解。
 
 ## 功能对照表
 
