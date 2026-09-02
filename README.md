@@ -1,4 +1,4 @@
-# PS VR2 PC 控制面板 v4.7.0
+# PS VR2 PC 控制面板 v4.8.0
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Python Version](https://img.shields.io/badge/Python-3.6+-green.svg)](https://www.python.org/downloads/)
@@ -12,6 +12,7 @@ PlayStation VR2 PC 管理工具，一键解锁 PS VR2 在 PC 上的隐藏功能�
 - ✅ 驱动备份/恢复（时间戳快照管理）
 - ✅ SteamVR 快速设置（渲染缩放/超采样/运动平滑）
 - ✅ **Toolkit 调节面板**（屏幕亮度 + 禁用安全区/Sense/眼动 + LED 同步 + 增强触觉，键名查证自官方源码）
+- ✅ **HDR 检测与开关**（Windows 高级色彩，DisplayConfig API；PSVR2 EDID 未暴露 HDR10 时诚实置灰）
 - ✅ SteamVR / VRCFaceTracking 进程监控
 - ✅ 一键启动 SteamVR + VRCFaceTracking
 - ✅ VRCFaceTracking Steam 安装入口
@@ -34,7 +35,7 @@ PlayStation VR2 PC 管理工具，一键解锁 PS VR2 在 PC 上的隐藏功能�
 
 ### 🎯 推荐：直接下载 exe（无需 Python）
 
-前往 [GitHub Releases](https://github.com/cpufreestyle/psvr2-panel/releases) 下载最新版本的 `PSVR2-Panel-v4.7.0.exe`，双击即可运行。
+前往 [GitHub Releases](https://github.com/cpufreestyle/psvr2-panel/releases) 下载最新版本的 `PSVR2-Panel-v4.8.0.exe`，双击即可运行。
 
 ### 💻 从源码运行
 
@@ -56,6 +57,12 @@ python main.py
 - Windows 10/11 64位
 - Python 3.6+（exe 版本无需 Python）
 - tkinter（Python 内置）
+
+## v4.8.0 更新
+
+| 类别 | 更新内容 |
+|------|---------|
+| ☀ HDR | 新增 HDR (Windows 高级色彩) 检测与开关（DisplayConfig API，结构体查证自 Windows SDK wingdi.h）。注意：PSVR2 显示器 EDID 当前未暴露 HDR10 元数据（PSVR2Toolkit 待解决 EDID override），故按钮会诚实置灰并说明原因；未来驱动层解决后无需更新面板即可生效 |
 
 ## v4.7.0 更新
 

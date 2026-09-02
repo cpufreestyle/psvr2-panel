@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-PS VR2 PC 控制面板 — PSVR2 Panel v4.7.0
+PS VR2 PC 控制面板 — PSVR2 Panel v4.8.0
 一键管理 PS VR2 在 PC 上的解锁功能，深度集成 PSVR2Toolkit 工具链
 
-v4.7.0 更新：
-  🎛 新增 Toolkit 调节面板：屏幕亮度滑条（steamvr.analogGain）+
-     5 项 Toolkit 开关（playstation_vr2_ex 节，键名查证自官方源码）
+v4.8.0 更新：
+  ☀ 新增 HDR (Windows 高级色彩) 检测与开关（DisplayConfig API）
+    — PSVR2 EDID 未暴露 HDR10 元数据时按钮置灰并说明原因
 
 作者: Michael Qiu (cpufreestyle)
 """
@@ -18,6 +18,8 @@ import json
 import os
 import re
 import sys
+import ctypes
+from ctypes import wintypes
 import threading
 import time
 import logging
@@ -35,7 +37,7 @@ from auto_updater import check_update_background
 # 常量 & 主题
 # ============================================================
 APP_NAME = "PSVR2 Panel"
-APP_VERSION = "4.7.0"
+APP_VERSION = "4.8.0"
 APP_AUTHOR = "Michael Qiu"
 GITEE_URL = "https://gitee.com/cpufreestyle/psvr2-panel"
 GITHUB_URL = "https://github.com/cpufreestyle/psvr2-panel"
@@ -201,6 +203,181 @@ def _steamvr_settings_path() -> Optional[Path]:
     if p.exists():
         return p
     return None
+
+
+# ============================================================
+# Windows HDR（高级色彩）检测与开关 — DisplayConfig API
+# 结构体与常量查证自本机 Windows SDK 10.0.26100.0 wingdi.h：
+#   GET_ADVANCED_COLOR_INFO=9 / SET_ADVANCED_COLOR_STATE=10
+# ============================================================
+_HDR_GET_TARGET_NAME = 2
+_HDR_GET_ADVANCED_COLOR_INFO = 9
+_HDR_SET_ADVANCED_COLOR_STATE = 10
+_QDC_ONLY_ACTIVE_PATHS = 1
+
+
+class _LUID(ctypes.Structure):
+    _fields_ = [("lowPart", wintypes.DWORD), ("highPart", wintypes.LONG)]
+
+
+class _HdrInfoHeader(ctypes.Structure):
+    _fields_ = [("type", ctypes.c_uint32), ("size", ctypes.c_uint32),
+                ("adapterId", _LUID), ("id", ctypes.c_uint32)]
+
+
+class _HdrGetColorInfo(ctypes.Structure):
+    """value 位域: bit0 supported, bit1 enabled, bit2 wideColorEnforced, bit3 forceDisabled"""
+    _fields_ = [("header", _HdrInfoHeader), ("value", ctypes.c_uint32)]
+
+
+class _HdrSetColorState(ctypes.Structure):
+    """value 位域: bit0 enableAdvancedColor"""
+    _fields_ = [("header", _HdrInfoHeader), ("value", ctypes.c_uint32)]
+
+
+class _Rational(ctypes.Structure):
+    _fields_ = [("numerator", ctypes.c_uint32), ("denominator", ctypes.c_uint32)]
+
+
+class _2DRegion(ctypes.Structure):
+    _fields_ = [("cx", ctypes.c_uint32), ("cy", ctypes.c_uint32)]
+
+
+class _VideoSignalInfo(ctypes.Structure):
+    _fields_ = [("pixelRate", ctypes.c_uint64), ("hSyncFreq", _Rational),
+                ("vSyncFreq", _Rational), ("activeSize", _2DRegion),
+                ("totalSize", _2DRegion), ("videoStandard", ctypes.c_uint32),
+                ("scanLineOrdering", ctypes.c_uint32)]
+
+
+class _TargetMode(ctypes.Structure):
+    _fields_ = [("targetVideoSignalInfo", _VideoSignalInfo)]
+
+
+class _SourceMode(ctypes.Structure):
+    _fields_ = [("width", ctypes.c_uint32), ("height", ctypes.c_uint32),
+                ("pixelFormat", ctypes.c_uint32),
+                ("position", wintypes.POINT), ("stride", ctypes.c_uint32)]
+
+
+class _DesktopImageInfo(ctypes.Structure):
+    _fields_ = [("pathSourceSize", wintypes.POINT),
+                ("desktopImageRegion", wintypes.RECT),
+                ("desktopImageClip", wintypes.RECT)]
+
+
+class _ModeInfoUnion(ctypes.Union):
+    _fields_ = [("targetMode", _TargetMode), ("sourceMode", _SourceMode),
+                ("desktopImageInfo", _DesktopImageInfo)]
+
+
+class _ModeInfo(ctypes.Structure):
+    _fields_ = [("infoType", ctypes.c_uint32), ("id", ctypes.c_uint32),
+                ("adapterId", _LUID), ("u", _ModeInfoUnion)]
+
+
+class _PathSourceInfo(ctypes.Structure):
+    _fields_ = [("adapterId", _LUID), ("id", ctypes.c_uint32),
+                ("modeInfoIdx", ctypes.c_uint32), ("statusFlags", ctypes.c_uint32)]
+
+
+class _PathTargetInfo(ctypes.Structure):
+    _fields_ = [("adapterId", _LUID), ("id", ctypes.c_uint32),
+                ("modeInfoIdx", ctypes.c_uint32),
+                ("outputTechnology", ctypes.c_uint32),
+                ("rotation", ctypes.c_uint32), ("scaling", ctypes.c_uint32),
+                ("refreshRate", _Rational), ("scanLineOrdering", ctypes.c_uint32),
+                ("targetAvailable", wintypes.BOOL), ("statusFlags", ctypes.c_uint32)]
+
+
+class _PathInfo(ctypes.Structure):
+    _fields_ = [("sourceInfo", _PathSourceInfo), ("targetInfo", _PathTargetInfo),
+                ("flags", ctypes.c_uint32)]
+
+
+class _TargetDeviceName(ctypes.Structure):
+    _fields_ = [("header", _HdrInfoHeader), ("flags", ctypes.c_uint32),
+                ("outputTechnology", ctypes.c_uint32),
+                ("edidManufactureId", ctypes.c_uint16),
+                ("edidProductCodeId", ctypes.c_uint16),
+                ("connectorInstance", ctypes.c_uint32),
+                ("monitorFriendlyDeviceName", wintypes.WCHAR * 64),
+                ("monitorDevicePath", wintypes.WCHAR * 128)]
+
+
+def _hdr_query_displays() -> List[Dict]:
+    """枚举活动显示路径，返回各显示器的 Advanced Color 状态"""
+    user32 = ctypes.windll.user32
+    num_paths = ctypes.c_uint32(0)
+    num_modes = ctypes.c_uint32(0)
+    if user32.GetDisplayConfigBufferSizes(_QDC_ONLY_ACTIVE_PATHS,
+                                          ctypes.byref(num_paths),
+                                          ctypes.byref(num_modes)) != 0:
+        return []
+    paths = (_PathInfo * num_paths.value)()
+    modes = (_ModeInfo * num_modes.value)()
+    if user32.QueryDisplayConfig(_QDC_ONLY_ACTIVE_PATHS,
+                                 ctypes.byref(num_paths), paths,
+                                 ctypes.byref(num_modes), modes,
+                                 None) != 0:
+        return []
+    displays = {}
+    for p in paths[:num_paths.value]:
+        t = p.targetInfo
+        key = (t.adapterId.lowPart, t.adapterId.highPart, t.id)
+        if key in displays:
+            # 同一显示器的多条路径，状态取 OR
+            prev = displays[key]
+            if prev["supported"] or prev["enabled"]:
+                continue
+        tn = _TargetDeviceName()
+        tn.header.type = _HDR_GET_TARGET_NAME
+        tn.header.size = ctypes.sizeof(_TargetDeviceName)
+        tn.header.adapterId = t.adapterId
+        tn.header.id = t.id
+        name = f"Display {t.id}"
+        if user32.DisplayConfigGetDeviceInfo(ctypes.byref(tn)) == 0:
+            name = tn.monitorFriendlyDeviceName or name
+        gi = _HdrGetColorInfo()
+        gi.header.type = _HDR_GET_ADVANCED_COLOR_INFO
+        gi.header.size = ctypes.sizeof(_HdrGetColorInfo)
+        gi.header.adapterId = t.adapterId
+        gi.header.id = t.id
+        supported = enabled = force_disabled = False
+        if user32.DisplayConfigGetDeviceInfo(ctypes.byref(gi)) == 0:
+            supported = bool(gi.value & 1)
+            enabled = bool(gi.value & 2)
+            force_disabled = bool(gi.value & 8)
+        prev = displays.get(key)
+        displays[key] = {
+            "name": name if not prev else (prev["name"] if prev["name"] != f"Display {t.id}" else name),
+            "adapter_low": t.adapterId.lowPart,
+            "adapter_high": t.adapterId.highPart, "target_id": t.id,
+            "supported": supported or (prev["supported"] if prev else False),
+            "enabled": enabled or (prev["enabled"] if prev else False),
+            "force_disabled": force_disabled or (prev["force_disabled"] if prev else False),
+        }
+    return list(displays.values())
+
+
+def _hdr_find_psvr(displays: List[Dict]) -> Optional[Dict]:
+    for d in displays:
+        nm = d["name"].lower()
+        if "psvr" in nm or "playstation" in nm:
+            return d
+    return None
+
+
+def _hdr_set_enabled(display: Dict, enable: bool) -> bool:
+    user32 = ctypes.windll.user32
+    st = _HdrSetColorState()
+    st.header.type = _HDR_SET_ADVANCED_COLOR_STATE
+    st.header.size = ctypes.sizeof(_HdrSetColorState)
+    st.header.adapterId.lowPart = display["adapter_low"]
+    st.header.adapterId.highPart = display["adapter_high"]
+    st.header.id = display["target_id"]
+    st.value = 1 if enable else 0
+    return user32.DisplayConfigSetDeviceInfo(ctypes.byref(st)) == 0
 
 
 # ============================================================
@@ -471,7 +648,7 @@ class PSVR2Toolkit:
         """返回 (成功, 版本, 下载链接)"""
         try:
             req = urllib.request.Request(PSVR2TOOLKIT_API)
-            req.add_header("User-Agent", "PSVR2Panel/4.7")
+            req.add_header("User-Agent", "PSVR2Panel/4.8")
             with urllib.request.urlopen(req, timeout=10) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
                 self.latest_version = data.get("tag_name", "unknown")
@@ -498,7 +675,7 @@ class PSVR2Toolkit:
             temp_file = temp_dir / DRIVER_TOOLKIT
 
             req = urllib.request.Request(url)
-            req.add_header("User-Agent", "PSVR2Panel/4.7")
+            req.add_header("User-Agent", "PSVR2Panel/4.8")
             with urllib.request.urlopen(req, timeout=60) as resp:
                 total = int(resp.headers.get("Content-Length", 0))
                 downloaded = 0
@@ -583,7 +760,7 @@ class VRCFaceTracking:
         """检查 GitHub 最新 Release，返回 (成功, 版本, 安装包链接)"""
         try:
             req = urllib.request.Request(VRCFT_API)
-            req.add_header("User-Agent", "PSVR2Panel/4.7")
+            req.add_header("User-Agent", "PSVR2Panel/4.8")
             with urllib.request.urlopen(req, timeout=10) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
             latest = data.get("tag_name", "unknown")
@@ -606,7 +783,7 @@ class VRCFaceTracking:
             name = url.split("/")[-1].split("?")[0] or "VRCFaceTracking_Setup.exe"
             temp_file = temp_dir / name
             req = urllib.request.Request(url)
-            req.add_header("User-Agent", "PSVR2Panel/4.7")
+            req.add_header("User-Agent", "PSVR2Panel/4.8")
             with urllib.request.urlopen(req, timeout=60) as resp:
                 total = int(resp.headers.get("Content-Length", 0))
                 downloaded = 0
@@ -655,7 +832,7 @@ class VRCFaceTracking:
         """检查 PSVR2 VRCFT 模块最新 Release，返回 (成功, 版本, dll 链接)"""
         try:
             req = urllib.request.Request(VRCFT_MODULE_API)
-            req.add_header("User-Agent", "PSVR2Panel/4.7")
+            req.add_header("User-Agent", "PSVR2Panel/4.8")
             with urllib.request.urlopen(req, timeout=10) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
             latest = data.get("tag_name", "unknown")
@@ -680,7 +857,7 @@ class VRCFaceTracking:
             temp_dir.mkdir(parents=True, exist_ok=True)
             temp_file = temp_dir / "PSVR2Toolkit.VRCFT.dll"
             req = urllib.request.Request(url)
-            req.add_header("User-Agent", "PSVR2Panel/4.7")
+            req.add_header("User-Agent", "PSVR2Panel/4.8")
             with urllib.request.urlopen(req, timeout=60) as resp:
                 total = int(resp.headers.get("Content-Length", 0))
                 downloaded = 0
@@ -1078,6 +1255,21 @@ class PSVR2Panel:
             lbl.pack(anchor="w")
             self.feat_labels[k] = lbl
 
+        # HDR（Windows 高级色彩）
+        _, hcard = card(p, "☀ HDR (Windows 高级色彩)")
+        hdr_row = tk.Frame(hcard, bg=C["card"])
+        hdr_row.pack(fill="x")
+        self.hdr_lbl = tk.Label(hdr_row, text="检测中...",
+                                font=("Microsoft YaHei", 9, "bold"),
+                                fg=C["text"], bg=C["card"], anchor="w")
+        self.hdr_lbl.pack(side="left", fill="x", expand=True)
+        self.hdr_btn = btn(hdr_row, "☀ 开启 HDR", self._toggle_hdr, "accent", 12)
+        self.hdr_btn.pack(side="right")
+        self.hdr_btn.config(state="disabled")
+        tk.Label(hcard, text="PSVR2 显示器 EDID 未暴露 HDR10 元数据时 Windows 无法开启 HDR",
+                 font=("Microsoft YaHei", 8),
+                 fg=C["text_sub"], bg=C["card"]).pack(anchor="w", pady=(4, 0))
+
         # 健康检查
         _, hc = card(p, "🩺 健康检查")
         tk.Label(hc, text="汇总驱动 / 连接 / 运行时 / 备份 / 自启状态，生成诊断报告",
@@ -1369,8 +1561,14 @@ class PSVR2Panel:
         def detect():
             self.detector.detect_all()
             module = self.detector.vrcft.get_module_status()
+            try:
+                hdr = _hdr_query_displays()
+            except Exception as e:
+                log.warning(f"HDR 查询失败: {e}")
+                hdr = []
             self.root.after(0, self._update_ui)
             self.root.after(0, self._on_module_status, module)
+            self.root.after(0, self._on_hdr_status, hdr)
         threading.Thread(target=detect, daemon=True).start()
 
     def _update_ui(self):
@@ -1460,6 +1658,62 @@ class PSVR2Panel:
             log.info("🔔 PS VR2 已断开")
         self._update_ui()
 
+    # ── HDR（Windows 高级色彩）──────────────────────────
+    def _on_hdr_status(self, displays: List[Dict]):
+        psvr = _hdr_find_psvr(displays)
+        self._hdr_psvr = psvr
+        if psvr is None:
+            self.hdr_lbl.config(text="未检测到 PSVR2 显示器", fg=C["text_sub"])
+            self.hdr_btn.config(state="disabled", text="☀ 开启 HDR")
+            return
+        if psvr["force_disabled"]:
+            self.hdr_lbl.config(text="被系统策略禁用", fg=C["red"])
+            self.hdr_btn.config(state="disabled", text="☀ 开启 HDR")
+            return
+        if not psvr["supported"]:
+            self.hdr_lbl.config(text="不支持（显示器 EDID 未暴露 HDR 能力）",
+                                fg=C["text_sub"])
+            self.hdr_btn.config(state="disabled", text="☀ 开启 HDR")
+            return
+        if psvr["enabled"]:
+            self.hdr_lbl.config(text="已开启", fg=C["green"])
+            self.hdr_btn.config(text="⏹ 关闭 HDR", state="normal")
+        else:
+            self.hdr_lbl.config(text="已关闭", fg=C["text"])
+            self.hdr_btn.config(text="☀ 开启 HDR", state="normal")
+
+    def _toggle_hdr(self):
+        psvr = getattr(self, "_hdr_psvr", None)
+        if not psvr:
+            return
+        enable = not psvr["enabled"]
+        self.hdr_btn.config(state="disabled")
+
+        def do_toggle():
+            try:
+                ok = _hdr_set_enabled(psvr, enable)
+            except Exception as e:
+                log.warning(f"HDR 切换失败: {e}")
+                ok = False
+            time.sleep(0.6)  # 等待 Windows 应用显示设置
+            self.root.after(0, self._on_hdr_toggle_done, ok)
+        threading.Thread(target=do_toggle, daemon=True).start()
+
+    def _on_hdr_toggle_done(self, ok: bool):
+        if not ok:
+            messagebox.showwarning("HDR", "切换失败：显示器或驱动不支持该操作")
+        self._refresh_hdr()
+
+    def _refresh_hdr(self):
+        def do_query():
+            try:
+                displays = _hdr_query_displays()
+            except Exception as e:
+                log.warning(f"HDR 查询失败: {e}")
+                displays = []
+            self.root.after(0, self._on_hdr_status, displays)
+        threading.Thread(target=do_query, daemon=True).start()
+
     # ── 健康检查 ────────────────────────────────────────
     def _run_health_check(self):
         def diagnose():
@@ -1489,6 +1743,18 @@ class PSVR2Panel:
                               else "VRCFT 眼动模块: 未安装"))
             else:
                 lines.append(("❌", "VRCFT: 未安装"))
+            try:
+                hdr_psvr = _hdr_find_psvr(_hdr_query_displays())
+                if hdr_psvr is None:
+                    lines.append(("ℹ️", "HDR: 未找到 PSVR2 显示器"))
+                elif hdr_psvr["enabled"]:
+                    lines.append(("✅", "HDR (Windows 高级色彩): 已开启"))
+                elif hdr_psvr["supported"]:
+                    lines.append(("⚠️", "HDR (Windows 高级色彩): 已支持但未开启"))
+                else:
+                    lines.append(("ℹ️", "HDR: 显示器 EDID 未暴露 HDR 能力"))
+            except Exception as e:
+                lines.append(("ℹ️", f"HDR: 查询失败（{e}）"))
             n = len(tk.list_backups())
             lines.append(("✅" if n else "⚠️", f"驱动备份: {n} 份"))
             lines.append(("ℹ️", f"开机自启: {'开启' if auto_start_enabled() else '关闭'}"))
@@ -1964,8 +2230,9 @@ class PSVR2Panel:
             f"{APP_NAME} v{APP_VERSION}\n\n"
             f"PlayStation VR2 PC 控制面板\n"
             f"深度集成 PSVR2Toolkit 工具链\n\n"
-            f"v4.7.0 更新：\n"
-            f"  🎛 Toolkit 调节面板（亮度 + 5 项开关）\n\n"
+            f"v4.8.0 更新：\n"
+            f"  ☀ HDR 检测与开关（DisplayConfig API）\n\n"
+            f"v4.7.0 更新：Toolkit 调节面板（亮度 + 5 项开关）\n"
             f"v4.6.0 更新：眼动模块部署 / Steam 路径检测 / 托盘增强\n"
             f"v4.5.0 更新：关闭 SteamVR / 操作容错 / 备份清理\n"
             f"v4.3.0 更新：PROFILE_DIR Bug 修复 / 规范整理\n"
