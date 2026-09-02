@@ -1,4 +1,4 @@
-# PS VR2 PC 控制面板 v4.8.0
+# PS VR2 PC 控制面板 v4.8.1
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Python Version](https://img.shields.io/badge/Python-3.6+-green.svg)](https://www.python.org/downloads/)
@@ -35,7 +35,7 @@ PlayStation VR2 PC 管理工具，一键解锁 PS VR2 在 PC 上的隐藏功能�
 
 ### 🎯 推荐：直接下载 exe（无需 Python）
 
-前往 [GitHub Releases](https://github.com/cpufreestyle/psvr2-panel/releases) 下载最新版本的 `PSVR2-Panel-v4.8.0.exe`，双击即可运行。
+前往 [GitHub Releases](https://github.com/cpufreestyle/psvr2-panel/releases) 下载最新版本的 `PSVR2-Panel-v4.8.1.exe`，双击即可运行。
 
 ### 💻 从源码运行
 
@@ -57,6 +57,12 @@ python main.py
 - Windows 10/11 64位
 - Python 3.6+（exe 版本无需 Python）
 - tkinter（Python 内置）
+
+## v4.8.1 更新
+
+| 类别 | 更新内容 |
+|------|---------|
+| 🛠 体验 | 托盘依赖（pystray/Pillow）缺失时自动 pip 安装并重试最小化，不再弹窗要求手动安装；exe 打包已内置托盘依赖 |
 
 ## v4.8.0 更新
 

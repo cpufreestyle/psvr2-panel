@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-PS VR2 PC 控制面板 — PSVR2 Panel v4.8.0
+PS VR2 PC 控制面板 — PSVR2 Panel v4.8.1
 一键管理 PS VR2 在 PC 上的解锁功能，深度集成 PSVR2Toolkit 工具链
 
-v4.8.0 更新：
-  ☀ 新增 HDR (Windows 高级色彩) 检测与开关（DisplayConfig API）
-    — PSVR2 EDID 未暴露 HDR10 元数据时按钮置灰并说明原因
+v4.8.1 更新：
+  🛠 托盘依赖缺失时自动 pip 安装 pystray/Pillow 并重试（不再弹窗要求手动装）
+  📦 exe 打包内置托盘依赖
 
 作者: Michael Qiu (cpufreestyle)
 """
@@ -37,7 +37,7 @@ from auto_updater import check_update_background
 # 常量 & 主题
 # ============================================================
 APP_NAME = "PSVR2 Panel"
-APP_VERSION = "4.8.0"
+APP_VERSION = "4.8.1"
 APP_AUTHOR = "Michael Qiu"
 GITEE_URL = "https://gitee.com/cpufreestyle/psvr2-panel"
 GITHUB_URL = "https://github.com/cpufreestyle/psvr2-panel"
@@ -2181,10 +2181,13 @@ class PSVR2Panel:
             import pystray
             from PIL import Image, ImageDraw
         except ImportError:
-            # pystray 未安装，降级为直接退出
-            messagebox.showinfo("提示",
-                "系统托盘功能需要安装 pystray 和 Pillow\npip install pystray Pillow")
-            self.destroy()
+            # 依赖缺失：自动安装后重试（仅自动尝试一轮，防循环）
+            if not getattr(self, "_tray_deps_installing", False):
+                self._auto_install_tray_deps()
+            else:
+                messagebox.showwarning("提示",
+                    "自动安装 pystray/Pillow 失败，请手动执行:\n"
+                    "pip install pystray Pillow")
             return
 
         # 创建托盘图标
@@ -2209,6 +2212,39 @@ class PSVR2Panel:
         self._tray_icon.run_detached()
         log.info("已最小化到系统托盘")
 
+    def _auto_install_tray_deps(self):
+        """托盘依赖缺失时自动 pip install pystray Pillow，成功后重试最小化"""
+        self._tray_deps_installing = True
+        log.info("托盘依赖缺失，正在自动安装 pystray/Pillow...")
+
+        def do_install():
+            try:
+                si = subprocess.STARTUPINFO()
+                si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                si.wShowWindow = subprocess.SW_HIDE
+                r = subprocess.run(
+                    [sys.executable, "-m", "pip", "install", "pystray", "Pillow"],
+                    capture_output=True, text=True, timeout=300, startupinfo=si)
+                ok = r.returncode == 0
+                if not ok:
+                    log.warning(f"pystray/Pillow 自动安装失败: "
+                                f"{(r.stderr or r.stdout or '')[-300:]}")
+            except Exception as e:
+                log.warning(f"pystray/Pillow 自动安装失败: {e}")
+                ok = False
+            self.root.after(0, self._on_tray_deps_installed, ok)
+        threading.Thread(target=do_install, daemon=True).start()
+
+    def _on_tray_deps_installed(self, ok: bool):
+        self._tray_deps_installing = False
+        if ok:
+            log.info("托盘依赖安装成功，重试最小化到托盘")
+            self._minimize_to_tray()
+        else:
+            messagebox.showwarning("提示",
+                "自动安装 pystray/Pillow 失败，请手动执行:\n"
+                "pip install pystray Pillow")
+
     def _restore_from_tray(self, icon=None, item=None):
         if hasattr(self, "_tray_icon"):
             self._tray_icon.stop()
@@ -2230,8 +2266,9 @@ class PSVR2Panel:
             f"{APP_NAME} v{APP_VERSION}\n\n"
             f"PlayStation VR2 PC 控制面板\n"
             f"深度集成 PSVR2Toolkit 工具链\n\n"
-            f"v4.8.0 更新：\n"
-            f"  ☀ HDR 检测与开关（DisplayConfig API）\n\n"
+            f"v4.8.1 更新：\n"
+            f"  🛠 托盘依赖自动安装（不再要求手动 pip）\n\n"
+            f"v4.8.0 更新：HDR 检测与开关（DisplayConfig API）\n"
             f"v4.7.0 更新：Toolkit 调节面板（亮度 + 5 项开关）\n"
             f"v4.6.0 更新：眼动模块部署 / Steam 路径检测 / 托盘增强\n"
             f"v4.5.0 更新：关闭 SteamVR / 操作容错 / 备份清理\n"
