@@ -1,14 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-PS VR2 PC 控制面板 — PSVR2 Panel v4.6.0
+PS VR2 PC 控制面板 — PSVR2 Panel v4.7.0
 一键管理 PS VR2 在 PC 上的解锁功能，深度集成 PSVR2Toolkit 工具链
 
-v4.6.0 更新：
-  🧩 新增 VRCFT 眼动模块一键下载部署（PSVR2Toolkit.VRCFT）
-  🐛 修复 PSVR2Toolkit API 地址失效（迁移至 BnuuySolutions）
-  📂 Steam 路径注册表自动检测（多库/自定义盘符）
-  🍱 托盘菜单增强：切换驱动 / 关闭 SteamVR / 健康检查
+v4.7.0 更新：
+  🎛 新增 Toolkit 调节面板：屏幕亮度滑条（steamvr.analogGain）+
+     5 项 Toolkit 开关（playstation_vr2_ex 节，键名查证自官方源码）
 
 作者: Michael Qiu (cpufreestyle)
 """
@@ -37,7 +35,7 @@ from auto_updater import check_update_background
 # 常量 & 主题
 # ============================================================
 APP_NAME = "PSVR2 Panel"
-APP_VERSION = "4.6.0"
+APP_VERSION = "4.7.0"
 APP_AUTHOR = "Michael Qiu"
 GITEE_URL = "https://gitee.com/cpufreestyle/psvr2-panel"
 GITHUB_URL = "https://github.com/cpufreestyle/psvr2-panel"
@@ -473,7 +471,7 @@ class PSVR2Toolkit:
         """返回 (成功, 版本, 下载链接)"""
         try:
             req = urllib.request.Request(PSVR2TOOLKIT_API)
-            req.add_header("User-Agent", "PSVR2Panel/4.6")
+            req.add_header("User-Agent", "PSVR2Panel/4.7")
             with urllib.request.urlopen(req, timeout=10) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
                 self.latest_version = data.get("tag_name", "unknown")
@@ -500,7 +498,7 @@ class PSVR2Toolkit:
             temp_file = temp_dir / DRIVER_TOOLKIT
 
             req = urllib.request.Request(url)
-            req.add_header("User-Agent", "PSVR2Panel/4.6")
+            req.add_header("User-Agent", "PSVR2Panel/4.7")
             with urllib.request.urlopen(req, timeout=60) as resp:
                 total = int(resp.headers.get("Content-Length", 0))
                 downloaded = 0
@@ -585,7 +583,7 @@ class VRCFaceTracking:
         """检查 GitHub 最新 Release，返回 (成功, 版本, 安装包链接)"""
         try:
             req = urllib.request.Request(VRCFT_API)
-            req.add_header("User-Agent", "PSVR2Panel/4.6")
+            req.add_header("User-Agent", "PSVR2Panel/4.7")
             with urllib.request.urlopen(req, timeout=10) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
             latest = data.get("tag_name", "unknown")
@@ -608,7 +606,7 @@ class VRCFaceTracking:
             name = url.split("/")[-1].split("?")[0] or "VRCFaceTracking_Setup.exe"
             temp_file = temp_dir / name
             req = urllib.request.Request(url)
-            req.add_header("User-Agent", "PSVR2Panel/4.6")
+            req.add_header("User-Agent", "PSVR2Panel/4.7")
             with urllib.request.urlopen(req, timeout=60) as resp:
                 total = int(resp.headers.get("Content-Length", 0))
                 downloaded = 0
@@ -657,7 +655,7 @@ class VRCFaceTracking:
         """检查 PSVR2 VRCFT 模块最新 Release，返回 (成功, 版本, dll 链接)"""
         try:
             req = urllib.request.Request(VRCFT_MODULE_API)
-            req.add_header("User-Agent", "PSVR2Panel/4.6")
+            req.add_header("User-Agent", "PSVR2Panel/4.7")
             with urllib.request.urlopen(req, timeout=10) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
             latest = data.get("tag_name", "unknown")
@@ -682,7 +680,7 @@ class VRCFaceTracking:
             temp_dir.mkdir(parents=True, exist_ok=True)
             temp_file = temp_dir / "PSVR2Toolkit.VRCFT.dll"
             req = urllib.request.Request(url)
-            req.add_header("User-Agent", "PSVR2Panel/4.6")
+            req.add_header("User-Agent", "PSVR2Panel/4.7")
             with urllib.request.urlopen(req, timeout=60) as resp:
                 total = int(resp.headers.get("Content-Length", 0))
                 downloaded = 0
@@ -827,6 +825,14 @@ class SteamVRSettings:
         if "steamvr" not in self.data:
             self.data["steamvr"] = {}
         self.data["steamvr"][key] = value
+
+    def get_in_section(self, section: str, key: str, default=None):
+        return self.data.get(section, {}).get(key, default)
+
+    def set_in_section(self, section: str, key: str, value):
+        if section not in self.data:
+            self.data[section] = {}
+        self.data[section][key] = value
 
 
     # ── 预设管理 ──
@@ -1212,6 +1218,54 @@ class PSVR2Panel:
         btn(pfc, "💾 保存", self._save_profile, "teal", 6).pack(side="left", padx=(0, 4))
         btn(pfc, "♻ 加载", self._load_profile, "accent", 6).pack(side="left", padx=(0, 4))
         btn(pfc, "🗑 删除", self._delete_profile, "red", 6).pack(side="left")
+
+        # Toolkit 调节（键名查证自 BnuuySolutions/PSVR2Toolkit 源码 vr_settings.h）
+        _, ctk = card(p, "🎛 Toolkit 调节")
+        tk.Label(ctk, text="PSVR2Toolkit 参数，写入 vrsettings，重启 SteamVR 生效；亮度经驱动桥接硬件",
+                 font=("Microsoft YaHei", 8),
+                 fg=C["text_sub"], bg=C["card"]).pack(anchor="w", pady=(0, 8))
+
+        tk.Label(ctk, text="屏幕亮度 (analogGain)",
+                 font=("Microsoft YaHei", 9), fg=C["text"], bg=C["card"]).pack(anchor="w")
+        bri_frame = tk.Frame(ctk, bg=C["card"])
+        bri_frame.pack(fill="x", pady=(2, 0))
+        self.tk_brightness = tk.DoubleVar(
+            value=float(self.sv_settings.get_in_section("steamvr", "analogGain", 1.0)))
+        ttk.Scale(bri_frame, from_=0.0, to_=1.0,
+                  variable=self.tk_brightness, orient="horizontal",
+                  command=lambda _: self._update_bri_lbl()).pack(side="left", fill="x", expand=True)
+        self.bri_lbl = tk.Label(bri_frame, text="100%",
+                                font=("Microsoft YaHei", 9, "bold"),
+                                fg=C["accent"], bg=C["card"], width=6)
+        self.bri_lbl.pack(side="right")
+        self._update_bri_lbl()
+
+        tk_switches = tk.Frame(ctk, bg=C["card"])
+        tk_switches.pack(fill="x", pady=(10, 0))
+        self.tk_chaperone = tk.BooleanVar(
+            value=bool(self.sv_settings.get_in_section("playstation_vr2_ex", "disableChaperone", False)))
+        self.tk_sense = tk.BooleanVar(
+            value=bool(self.sv_settings.get_in_section("playstation_vr2_ex", "disableSense", False)))
+        self.tk_gaze = tk.BooleanVar(
+            value=bool(self.sv_settings.get_in_section("playstation_vr2_ex", "disableGaze", False)))
+        self.tk_sync = tk.BooleanVar(
+            value=bool(self.sv_settings.get_in_section("playstation_vr2_ex", "useToolkitSync", True)))
+        self.tk_haptics = tk.BooleanVar(
+            value=bool(self.sv_settings.get_in_section("playstation_vr2_ex", "useEnhancedHaptics", True)))
+        ttk.Checkbutton(tk_switches, text="禁用安全区边界", variable=self.tk_chaperone,
+                        style="TCheckbutton").grid(row=0, column=0, sticky="w", padx=(0, 12))
+        ttk.Checkbutton(tk_switches, text="禁用 Sense 控制器", variable=self.tk_sense,
+                        style="TCheckbutton").grid(row=0, column=1, sticky="w")
+        ttk.Checkbutton(tk_switches, text="禁用眼动追踪", variable=self.tk_gaze,
+                        style="TCheckbutton").grid(row=1, column=0, sticky="w", padx=(0, 12), pady=(4, 0))
+        ttk.Checkbutton(tk_switches, text="Toolkit LED 同步", variable=self.tk_sync,
+                        style="TCheckbutton").grid(row=1, column=1, sticky="w", pady=(4, 0))
+        ttk.Checkbutton(tk_switches, text="增强触觉", variable=self.tk_haptics,
+                        style="TCheckbutton").grid(row=2, column=0, sticky="w", padx=(0, 12), pady=(4, 0))
+
+        btn_frame_tk = tk.Frame(ctk, bg=C["card"])
+        btn_frame_tk.pack(fill="x", pady=(10, 0))
+        btn(btn_frame_tk, "💾 应用 Toolkit 设置", self._apply_toolkit_settings, "green", 16).pack(anchor="w")
 
         if not self.sv_settings.path:
             tk.Label(c, text="⚠ SteamVR 设置文件未找到",
@@ -1601,6 +1655,30 @@ class PSVR2Panel:
         self._update_scale_lbl()
         messagebox.showinfo("重置", "已恢复默认值，请点击「应用设置」保存")
 
+    # ── Toolkit 调节 ────────────────────────────────────
+    def _update_bri_lbl(self):
+        self.bri_lbl.config(text=f"{int(self.tk_brightness.get() * 100)}%")
+
+    def _apply_toolkit_settings(self):
+        self.sv_settings.load()
+        self.sv_settings.set_in_section("steamvr", "analogGain",
+                                        self.tk_brightness.get())
+        self.sv_settings.set_in_section("playstation_vr2_ex", "disableChaperone",
+                                        self.tk_chaperone.get())
+        self.sv_settings.set_in_section("playstation_vr2_ex", "disableSense",
+                                        self.tk_sense.get())
+        self.sv_settings.set_in_section("playstation_vr2_ex", "disableGaze",
+                                        self.tk_gaze.get())
+        self.sv_settings.set_in_section("playstation_vr2_ex", "useToolkitSync",
+                                        self.tk_sync.get())
+        self.sv_settings.set_in_section("playstation_vr2_ex", "useEnhancedHaptics",
+                                        self.tk_haptics.get())
+        success, msg = self.sv_settings.save()
+        if success:
+            messagebox.showinfo("Toolkit 设置", "已保存（重启 SteamVR 生效）")
+        else:
+            messagebox.showerror("Toolkit 设置", msg)
+
     # ── 系统选项 ────────────────────────────────────────
     def _save_profile(self):
         name = self.profile_combo.get()
@@ -1886,10 +1964,9 @@ class PSVR2Panel:
             f"{APP_NAME} v{APP_VERSION}\n\n"
             f"PlayStation VR2 PC 控制面板\n"
             f"深度集成 PSVR2Toolkit 工具链\n\n"
-            f"v4.6.0 更新：\n"
-            f"  🧩 VRCFT 眼动模块一键部署\n"
-            f"  🐛 修复 Toolkit API 地址失效\n"
-            f"  📂 Steam 路径注册表自动检测\n\n"
+            f"v4.7.0 更新：\n"
+            f"  🎛 Toolkit 调节面板（亮度 + 5 项开关）\n\n"
+            f"v4.6.0 更新：眼动模块部署 / Steam 路径检测 / 托盘增强\n"
             f"v4.5.0 更新：关闭 SteamVR / 操作容错 / 备份清理\n"
             f"v4.3.0 更新：PROFILE_DIR Bug 修复 / 规范整理\n"
             f"v4.2.0 更新：PlayStation 深色主题 / 驱动切换\n"

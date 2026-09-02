@@ -1,4 +1,4 @@
-# PS VR2 PC 控制面板 v4.6.0
+# PS VR2 PC 控制面板 v4.7.0
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Python Version](https://img.shields.io/badge/Python-3.6+-green.svg)](https://www.python.org/downloads/)
@@ -11,6 +11,7 @@ PlayStation VR2 PC 管理工具，一键解锁 PS VR2 在 PC 上的隐藏功能�
 - ✅ 驱动一键切换（官方 ↔ PSVR2Toolkit）
 - ✅ 驱动备份/恢复（时间戳快照管理）
 - ✅ SteamVR 快速设置（渲染缩放/超采样/运动平滑）
+- ✅ **Toolkit 调节面板**（屏幕亮度 + 禁用安全区/Sense/眼动 + LED 同步 + 增强触觉，键名查证自官方源码）
 - ✅ SteamVR / VRCFaceTracking 进程监控
 - ✅ 一键启动 SteamVR + VRCFaceTracking
 - ✅ VRCFaceTracking Steam 安装入口
@@ -33,7 +34,7 @@ PlayStation VR2 PC 管理工具，一键解锁 PS VR2 在 PC 上的隐藏功能�
 
 ### 🎯 推荐：直接下载 exe（无需 Python）
 
-前往 [GitHub Releases](https://github.com/cpufreestyle/psvr2-panel/releases) 下载最新版本的 `PSVR2-Panel-v4.6.0.exe`，双击即可运行。
+前往 [GitHub Releases](https://github.com/cpufreestyle/psvr2-panel/releases) 下载最新版本的 `PSVR2-Panel-v4.7.0.exe`，双击即可运行。
 
 ### 💻 从源码运行
 
@@ -55,6 +56,12 @@ python main.py
 - Windows 10/11 64位
 - Python 3.6+（exe 版本无需 Python）
 - tkinter（Python 内置）
+
+## v4.7.0 更新
+
+| 类别 | 更新内容 |
+|------|---------|
+| 🎛 调节 | 新增 Toolkit 调节面板：屏幕亮度滑条（`steamvr.analogGain`，驱动桥接硬件 0-31 级）+ 5 项开关键（`playstation_vr2_ex` 节：禁用安全区/Sense/眼动、Toolkit LED 同步、增强触觉），键名全部查证自 BnuuySolutions/PSVR2Toolkit 官方源码 |
 
 ## v4.6.0 更新
 
