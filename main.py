@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-PS VR2 PC 控制面板 — PSVR2 Panel v4.8.1
+PS VR2 PC 控制面板 — PSVR2 Panel v4.9.0
 一键管理 PS VR2 在 PC 上的解锁功能，深度集成 PSVR2Toolkit 工具链
 
-v4.8.1 更新：
-  🛠 托盘依赖缺失时自动 pip 安装 pystray/Pillow 并重试（不再弹窗要求手动装）
-  📦 exe 打包内置托盘依赖
+v4.9.0 更新：
+  🎮 新增自定义快捷启动（VR 游戏/应用，exe 或 steam:// 链接）
+  🔔 托盘气泡通知（驱动切换/备份完成）
+  ⏰ 定期自动备份（默认 7 天，AUTO_BACKUP_INTERVAL_DAYS 可配）
+  🔇 --minimized 启动参数 + 开机自启静默进托盘
 
 作者: Michael Qiu (cpufreestyle)
 """
@@ -37,7 +39,7 @@ from auto_updater import check_update_background
 # 常量 & 主题
 # ============================================================
 APP_NAME = "PSVR2 Panel"
-APP_VERSION = "4.8.1"
+APP_VERSION = "4.9.0"
 APP_AUTHOR = "Michael Qiu"
 GITEE_URL = "https://gitee.com/cpufreestyle/psvr2-panel"
 GITHUB_URL = "https://github.com/cpufreestyle/psvr2-panel"
@@ -121,6 +123,7 @@ VRCFT_PATHS = [
 VRCFT_DEPLOY = Path.home() / "AppData" / "Local" / "PSVR2Panel" / "VRCFaceTracking"
 BACKUP_DIR = Path.home() / "AppData" / "Local" / "PSVR2Panel" / "backups"
 BACKUP_KEEP = 5  # 驱动备份自动保留份数
+AUTO_BACKUP_INTERVAL_DAYS = 7  # 定期自动备份间隔（天），0 = 关闭
 LOG_DIR = Path.home() / "AppData" / "Local" / "PSVR2Panel" / "logs"
 PROFILE_DIR = Path.home() / "AppData" / "Local" / "PSVR2Panel" / "profiles"
 
@@ -408,8 +411,12 @@ def set_auto_start(enable: bool) -> bool:
         )
         if enable:
             exe_path = sys.executable
-            winreg.SetValueEx(key, APP_NAME, 0, winreg.REG_SZ, f'"{exe_path}"')
-            log.info(f"开机启动已开启: {exe_path}")
+            # frozen(exe) 直接带参；源码模式补上 main.py 路径（修复原仅写 python.exe 的 bug）
+            arg = " --minimized" if getattr(sys, "frozen", False) \
+                else f' "{os.path.abspath(sys.argv[0])}" --minimized'
+            cmd = f'"{exe_path}"{arg}'
+            winreg.SetValueEx(key, APP_NAME, 0, winreg.REG_SZ, cmd)
+            log.info(f"开机启动已开启: {cmd}")
         else:
             try:
                 winreg.DeleteValue(key, APP_NAME)
@@ -590,6 +597,24 @@ class PSVR2Toolkit:
         if removed:
             log.info(f"已自动清理 {removed} 份旧备份")
         return removed
+
+    def auto_backup_if_stale(self, interval_days: int = AUTO_BACKUP_INTERVAL_DAYS) -> bool:
+        """超过 interval_days 天未备份则自动创建一份，返回是否创建"""
+        if interval_days <= 0 or not self.driver_installed:
+            return False
+        backups = self.list_backups()
+        if backups:
+            latest = backups[0].get("timestamp", "")
+            try:
+                latest_dt = datetime.strptime(latest, "%Y%m%d_%H%M%S")
+                if (datetime.now() - latest_dt).days < interval_days:
+                    return False
+            except ValueError:
+                pass
+        ok, msg = self.backup()
+        if ok:
+            log.info(f"定期自动备份已创建: {msg}")
+        return ok
 
     def list_backups(self) -> List[Dict]:
         backups = []
@@ -880,6 +905,66 @@ class VRCFaceTracking:
 
 
 # ============================================================
+# 自定义快捷启动管理
+# ============================================================
+SHORTCUTS_FILE = Path.home() / "AppData" / "Local" / "PSVR2Panel" / "shortcuts.json"
+
+
+class PSVR2Shortcuts:
+    """用户自定义 VR 快捷方式（exe 路径或 steam:// URL），持久化到 JSON"""
+
+    def __init__(self):
+        self.items: List[Dict] = []
+        self.load()
+
+    def load(self):
+        self.items = []
+        if SHORTCUTS_FILE.exists():
+            try:
+                with open(SHORTCUTS_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if isinstance(data, list):
+                    self.items = [x for x in data
+                                  if isinstance(x, dict) and x.get("name") and x.get("target")]
+            except Exception as e:
+                log.warning(f"快捷方式读取失败: {e}")
+
+    def save(self):
+        SHORTCUTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(SHORTCUTS_FILE, "w", encoding="utf-8") as f:
+            json.dump(self.items, f, ensure_ascii=False, indent=2)
+
+    def add(self, name: str, target: str) -> bool:
+        if any(x["target"].lower() == target.lower() for x in self.items):
+            return False
+        self.items.append({"name": name, "target": target})
+        self.save()
+        log.info(f"快捷方式已添加: {name} -> {target}")
+        return True
+
+    def remove(self, name: str):
+        self.items = [x for x in self.items if x["name"] != name]
+        self.save()
+
+    def launch(self, index: int) -> bool:
+        if 0 <= index < len(self.items):
+            target = self.items[index]["target"]
+            try:
+                if target.lower().startswith(("steam://", "http://", "https://")):
+                    os.startfile(target)
+                elif os.path.exists(target):
+                    _popen([target])
+                else:
+                    log.warning(f"快捷方式目标不存在: {target}")
+                    return False
+                log.info(f"快捷方式已启动: {self.items[index]['name']}")
+                return True
+            except Exception as e:
+                log.error(f"快捷方式启动失败: {e}")
+        return False
+
+
+# ============================================================
 # SteamVR 监控
 # ============================================================
 class SteamVRMonitor:
@@ -1108,9 +1193,10 @@ def section(parent, text: str, color: str = None) -> tk.Frame:
     return f
 
 class PSVR2Panel:
-    def __init__(self):
+    def __init__(self, start_minimized: bool = False):
         self.detector = PSVR2Detector()
         self.sv_settings = SteamVRSettings()
+        self.shortcuts = PSVR2Shortcuts()
         self._stop_monitor = threading.Event()
 
         self.root = tk.Tk()
@@ -1125,7 +1211,24 @@ class PSVR2Panel:
         self._run_detection()
         self._start_monitor()
 
+        # 定期自动备份（后台执行，避免阻塞 UI）
+        if AUTO_BACKUP_INTERVAL_DAYS > 0:
+            threading.Thread(target=self._auto_backup_worker, daemon=True).start()
+
+        # --minimized：启动后直接最小化到托盘
+        if start_minimized:
+            self.root.after(300, self._minimize_to_tray)
+
         log.info(f"{APP_NAME} v{APP_VERSION} 已启动")
+
+    def _auto_backup_worker(self):
+        try:
+            self.detector.toolkit.find_installation()
+            self.detector.toolkit.auto_backup_if_stale()
+            if self.detector.toolkit.driver_installed:
+                self.root.after(0, self._refresh_backup_list)
+        except Exception as e:
+            log.warning(f"定期自动备份失败: {e}")
 
     def _setup_ttk_theme(self):
         s = ttk.Style()
@@ -1497,6 +1600,24 @@ class PSVR2Panel:
         stop_frame.pack(fill="x", pady=(4, 0))
         btn(stop_frame, "⏹ 关闭 SteamVR", self._stop_steamvr, "red", 14).pack(anchor="w")
 
+        # 自定义快捷启动
+        _, c6 = card(p, "🎮 自定义快捷启动")
+        tk.Label(c6, text="添加 VR 游戏/应用（exe 或 steam:// 链接），一键启动",
+                 font=("Microsoft YaHei", 8),
+                 fg=C["text_sub"], bg=C["card"]).pack(anchor="w", pady=(0, 4))
+        self.shortcut_listbox = tk.Listbox(c6, font=("Microsoft YaHei", 9),
+                                           bg=C["card_hi"], fg=C["text"],
+                                           selectbackground=C["accent"],
+                                           selectforeground=C["text"],
+                                           highlightthickness=0, bd=0, height=4)
+        self.shortcut_listbox.pack(fill="x", pady=(0, 6))
+        sc_btn_frame = tk.Frame(c6, bg=C["card"])
+        sc_btn_frame.pack(fill="x")
+        btn(sc_btn_frame, "➕ 添加", self._add_shortcut, "teal", 8).pack(side="left", padx=(0, 4))
+        btn(sc_btn_frame, "🚀 启动", self._launch_shortcut, "green", 8).pack(side="left", padx=(0, 4))
+        btn(sc_btn_frame, "🗑 删除", self._delete_shortcut, "red", 8).pack(side="left")
+        self._refresh_shortcut_list()
+
         # VRCFT 升级
         _, c4 = card(p, "⬆️ VRCFT 升级")
         ver_row = tk.Frame(c4, bg=C["card"])
@@ -1714,6 +1835,16 @@ class PSVR2Panel:
             self.root.after(0, self._on_hdr_status, displays)
         threading.Thread(target=do_query, daemon=True).start()
 
+    def _notify(self, message: str, title: str = None):
+        """托盘气泡通知（无托盘时降级为日志）"""
+        log.info(f"🔔 {message}")
+        icon = getattr(self, "_tray_icon", None)
+        if icon:
+            try:
+                icon.notify(message, title or APP_NAME)
+            except Exception as e:
+                log.warning(f"气泡通知失败: {e}")
+
     # ── 健康检查 ────────────────────────────────────────
     def _run_health_check(self):
         def diagnose():
@@ -1794,6 +1925,7 @@ class PSVR2Panel:
             return
         success, msg = tk_info.switch(to_toolkit)
         if success:
+            self._notify(msg)
             messagebox.showinfo("成功", msg)
             self._run_detection()
         else:
@@ -1853,6 +1985,7 @@ class PSVR2Panel:
     def _do_backup(self):
         success, msg = self.detector.toolkit.backup()
         if success:
+            self._notify(msg)
             messagebox.showinfo("备份", msg)
             self._refresh_backup_list()
         else:
@@ -2169,6 +2302,49 @@ class PSVR2Panel:
             self.root.after(0, self._on_module_status, name)
         threading.Thread(target=do_check, daemon=True).start()
 
+    # ── 自定义快捷启动 ──────────────────────────────────
+    def _refresh_shortcut_list(self):
+        self.shortcut_listbox.delete(0, "end")
+        for item in self.shortcuts.items:
+            self.shortcut_listbox.insert("end", f"🎮 {item['name']}")
+
+    def _add_shortcut(self):
+        target = simpledialog.askstring(
+            "添加快捷方式",
+            "输入 exe 完整路径或 steam:// 链接:",
+            parent=self.root)
+        if not target:
+            return
+        default_name = Path(target.replace("steam://", "").rstrip("/")).stem \
+            if "://" not in target else "Steam 内容"
+        name = simpledialog.askstring("名称", "快捷方式名称:",
+                                      initialvalue=default_name, parent=self.root)
+        if not name:
+            return
+        if self.shortcuts.add(name, target):
+            self._refresh_shortcut_list()
+            self._notify(f"快捷方式已添加: {name}")
+        else:
+            messagebox.showwarning("提示", "该目标已存在")
+
+    def _launch_shortcut(self):
+        sel = self.shortcut_listbox.curselection()
+        if not sel:
+            messagebox.showwarning("提示", "请先选择一个快捷方式")
+            return
+        if not self.shortcuts.launch(sel[0]):
+            messagebox.showerror("失败", "启动失败（目标不存在或不可执行）")
+
+    def _delete_shortcut(self):
+        sel = self.shortcut_listbox.curselection()
+        if not sel:
+            messagebox.showwarning("提示", "请先选择一个快捷方式")
+            return
+        name = self.shortcuts.items[sel[0]]["name"]
+        if messagebox.askyesno("确认", f"删除快捷方式「{name}」？"):
+            self.shortcuts.remove(name)
+            self._refresh_shortcut_list()
+
     # ── 窗口关闭/托盘 ────────────────────────────────────
     def _on_close_request(self):
         if self.minimize_tray_var.get():
@@ -2266,8 +2442,10 @@ class PSVR2Panel:
             f"{APP_NAME} v{APP_VERSION}\n\n"
             f"PlayStation VR2 PC 控制面板\n"
             f"深度集成 PSVR2Toolkit 工具链\n\n"
-            f"v4.8.1 更新：\n"
-            f"  🛠 托盘依赖自动安装（不再要求手动 pip）\n\n"
+            f"v4.9.0 更新：\n"
+            f"  🎮 自定义快捷启动 / 🔔 气泡通知\n"
+            f"  ⏰ 定期自动备份 / 🔇 --minimized 静默启动\n\n"
+            f"v4.8.1 更新：托盘依赖自动安装\n"
             f"v4.8.0 更新：HDR 检测与开关（DisplayConfig API）\n"
             f"v4.7.0 更新：Toolkit 调节面板（亮度 + 5 项开关）\n"
             f"v4.6.0 更新：眼动模块部署 / Steam 路径检测 / 托盘增强\n"
@@ -2338,7 +2516,7 @@ class PSVR2Panel:
 # ============================================================
 if __name__ == "__main__":
     try:
-        app = PSVR2Panel()
+        app = PSVR2Panel(start_minimized="--minimized" in sys.argv)
         app.run()
     except Exception as e:
         log.exception("Fatal error")

@@ -1,4 +1,4 @@
-# PS VR2 PC 控制面板 v4.8.1
+# PS VR2 PC 控制面板 v4.9.0
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Python Version](https://img.shields.io/badge/Python-3.6+-green.svg)](https://www.python.org/downloads/)
@@ -29,13 +29,17 @@ PlayStation VR2 PC 管理工具，一键解锁 PS VR2 在 PC 上的隐藏功能�
 - ✅ **VRCFT 升级管理**（版本检查 / 一键下载安装包）
 - ✅ **VRCFT 眼动模块一键部署**（PSVR2Toolkit.VRCFT，用于 VRChat 眼动追踪）
 - ✅ **Steam 路径自动检测**（注册表 + 多库扫描，告别硬编码盘符）
+- ✅ **自定义快捷启动**（VR 游戏/应用，exe 或 steam:// 链接一键启动）
+- ✅ **托盘气泡通知**（驱动切换/备份完成时弹出）
+- ✅ **定期自动备份**（默认 7 天未备份自动创建）
+- ✅ **--minimized 静默启动**（开机自启直进托盘）
 - ✅ 可滚动画布（界面内容再多不被裁剪）
 
 ## 安装
 
 ### 🎯 推荐：直接下载 exe（无需 Python）
 
-前往 [GitHub Releases](https://github.com/cpufreestyle/psvr2-panel/releases) 下载最新版本的 `PSVR2-Panel-v4.8.1.exe`，双击即可运行。
+前往 [GitHub Releases](https://github.com/cpufreestyle/psvr2-panel/releases) 下载最新版本的 `PSVR2-Panel-v4.9.0.exe`，双击即可运行。
 
 ### 💻 从源码运行
 
@@ -57,6 +61,15 @@ python main.py
 - Windows 10/11 64位
 - Python 3.6+（exe 版本无需 Python）
 - tkinter（Python 内置）
+
+## v4.9.0 更新
+
+| 类别 | 更新内容 |
+|------|---------|
+| 🎮 启动 | 新增自定义快捷启动卡片：添加任意 VR 游戏/应用（exe 完整路径或 steam:// 链接），一键启动，持久化保存 |
+| 🔔 通知 | 托盘气泡通知：驱动切换/备份完成时弹出（pystray 原生，无新依赖） |
+| ⏰ 备份 | 定期自动备份：超过 7 天未备份自动创建（`AUTO_BACKUP_INTERVAL_DAYS` 可配，0=关闭），与自动清理形成完整生命周期 |
+| 🔇 自启 | 新增 `--minimized` 启动参数；开机自启注册命令带参直进托盘（并修复源码模式自启缺 main.py 参数的 bug） |
 
 ## v4.8.1 更新
 
