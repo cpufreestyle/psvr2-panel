@@ -1224,9 +1224,11 @@ class PSVR2Panel:
     def _auto_backup_worker(self):
         try:
             self.detector.toolkit.find_installation()
-            self.detector.toolkit.auto_backup_if_stale()
+            ok = self.detector.toolkit.auto_backup_if_stale()
             if self.detector.toolkit.driver_installed:
                 self.root.after(0, self._refresh_backup_list)
+            if ok:
+                self._notify("驱动已自动备份（定期）")
         except Exception as e:
             log.warning(f"定期自动备份失败: {e}")
 
