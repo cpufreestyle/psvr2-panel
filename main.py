@@ -1,14 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-PS VR2 PC 控制面板 — PSVR2 Panel v4.9.1
+PS VR2 PC 控制面板 — PSVR2 Panel v4.9.2
 一键管理 PS VR2 在 PC 上的解锁功能，深度集成 PSVR2Toolkit 工具链
 
-v4.9.1 更新：
-  🛠 托盘未创建时的气泡通知入队补发（修复启动期自动备份通知丢失）
-  🛠 快捷方式保存失败回滚 + 损坏 shortcuts.json 自动备份为 .bak
-  🧹 review 清理：托盘图标置空/引号路径兼容/同名拒绝/withdraw 消除闪烁
-  ✅ 新增单元测试（17 例）+ CI 改为严格失败模式
+v4.9.2 更新：
+  🔒 单实例互斥锁（重复启动静默退出/弹提示）
+  ♻️ 旧格式自启条目启动时静默迁移为新格式
 
 作者: Michael Qiu (cpufreestyle)
 """
@@ -39,7 +37,7 @@ from auto_updater import check_update_background
 # 常量 & 主题
 # ============================================================
 APP_NAME = "PSVR2 Panel"
-APP_VERSION = "4.9.1"
+APP_VERSION = "4.9.2"
 APP_AUTHOR = "Michael Qiu"
 GITEE_URL = "https://gitee.com/cpufreestyle/psvr2-panel"
 GITHUB_URL = "https://github.com/cpufreestyle/psvr2-panel"
@@ -428,6 +426,23 @@ def set_auto_start(enable: bool) -> bool:
     except Exception as e:
         log.error(f"开机启动设置失败: {e}")
         return False
+
+
+def migrate_auto_start_if_needed():
+    """旧格式自启条目（无 --minimized / 源码模式缺 main.py）静默升级为新格式"""
+    run_key = r"Software\Microsoft\Windows\CurrentVersion\Run"
+    try:
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, run_key, 0, winreg.KEY_READ)
+        value, _ = winreg.QueryValueEx(key, APP_NAME)
+        winreg.CloseKey(key)
+    except (FileNotFoundError, OSError):
+        return  # 未开启自启，无需迁移
+    exe_path = sys.executable
+    arg = " --minimized" if getattr(sys, "frozen", False) \
+        else f' "{os.path.abspath(sys.argv[0])}" --minimized'
+    if value != f'"{exe_path}"{arg}':
+        log.info("检测到旧格式自启条目，静默迁移为新格式")
+        set_auto_start(True)
 
 
 # ============================================================
@@ -1237,6 +1252,9 @@ class PSVR2Panel:
         # 定期自动备份（后台执行，避免阻塞 UI）
         if AUTO_BACKUP_INTERVAL_DAYS > 0:
             threading.Thread(target=self._auto_backup_worker, daemon=True).start()
+
+        # 旧格式自启条目静默迁移（注册表操作轻量，后台执行）
+        threading.Thread(target=migrate_auto_start_if_needed, daemon=True).start()
 
         # --minimized：启动后直接最小化到托盘
         if start_minimized:
@@ -2481,9 +2499,9 @@ class PSVR2Panel:
             f"{APP_NAME} v{APP_VERSION}\n\n"
             f"PlayStation VR2 PC 控制面板\n"
             f"深度集成 PSVR2Toolkit 工具链\n\n"
-            f"v4.9.1 更新：\n"
-            f"  🛠 启动期通知入队补发 / 快捷方式持久化加固\n"
-            f"  ✅ 新增 17 例单元测试 + CI 严格模式\n\n"
+            f"v4.9.2 更新：\n"
+            f"  🔒 单实例互斥锁 / ♻️ 自启条目迁移\n\n"
+            f"v4.9.1 更新：通知队列 / 持久化加固 / 单元测试\n"
             f"v4.9.0 更新：快捷启动 / 气泡通知 / 定期备份 / 静默启动\n"
             f"v4.8.1 更新：托盘依赖自动安装\n"
             f"v4.8.0 更新：HDR 检测与开关（DisplayConfig API）\n"
@@ -2555,6 +2573,15 @@ class PSVR2Panel:
 # 入口
 # ============================================================
 if __name__ == "__main__":
+    # 单实例互斥锁：重复启动时 --minimized 静默退出，手动启动弹提示
+    _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    _mutex_handle = _kernel32.CreateMutexW(None, False, "PSVR2Panel_SingleInstance_Mutex")
+    if ctypes.get_last_error() == 183:  # ERROR_ALREADY_EXISTS
+        log.info("检测到已有实例运行，退出本次启动")
+        if "--minimized" not in sys.argv:
+            ctypes.windll.user32.MessageBoxW(
+                None, "PSVR2 Panel 已在运行（请查看系统托盘）", APP_NAME, 0x40)
+        sys.exit(0)
     try:
         app = PSVR2Panel(start_minimized="--minimized" in sys.argv)
         app.run()
