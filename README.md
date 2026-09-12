@@ -1,7 +1,7 @@
 # PS VR2 PC 控制面板 v4.9.0
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![Python Version](https://img.shields.io/badge/Python-3.6+-green.svg)](https://www.python.org/downloads/)
+[![Python Version](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/downloads/)
 
 PlayStation VR2 PC 管理工具，一键解锁 PS VR2 在 PC 上的隐藏功能。
 
@@ -59,7 +59,7 @@ python main.py
 ## 系统要求
 
 - Windows 10/11 64位
-- Python 3.6+（exe 版本无需 Python）
+- Python 3.10+（Pillow 12 要求；exe 版无需 Python）
 - tkinter（Python 内置）
 
 ## v4.9.0 更新
