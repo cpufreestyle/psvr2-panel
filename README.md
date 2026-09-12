@@ -1,4 +1,4 @@
-# PS VR2 PC 控制面板 v4.9.0
+# PS VR2 PC 控制面板 v4.9.1
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Python Version](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/downloads/)
@@ -39,7 +39,7 @@ PlayStation VR2 PC 管理工具，一键解锁 PS VR2 在 PC 上的隐藏功能�
 
 ### 🎯 推荐：直接下载 exe（无需 Python）
 
-前往 [GitHub Releases](https://github.com/cpufreestyle/psvr2-panel/releases) 下载最新版本的 `PSVR2-Panel-v4.9.0.exe`，双击即可运行。
+前往 [GitHub Releases](https://github.com/cpufreestyle/psvr2-panel/releases) 下载最新版本的 `PSVR2-Panel-v4.9.1.exe`，双击即可运行。
 
 ### 💻 从源码运行
 
@@ -61,6 +61,14 @@ python main.py
 - Windows 10/11 64位
 - Python 3.10+（Pillow 12 要求；exe 版无需 Python）
 - tkinter（Python 内置）
+
+## v4.9.1 更新
+
+| 类别 | 更新内容 |
+|------|---------|
+| 🛠 修复 | 托盘未创建时的气泡通知入队补发（修复启动期自动备份通知丢失）；快捷方式保存失败回滚内存态，损坏 shortcuts.json 自动备份为 .bak |
+| 🧹 清理 | 恢复窗口后托盘图标引用置空；兼容"复制文件地址"的带引号路径；拒绝同名快捷方式；--minimized 构建前隐藏消除闪烁 |
+| ✅ 测试 | 新增 17 例单元测试（auto_backup 过期数学 + shortcuts 全逻辑，无头可跑）；CI 改为严格失败模式 |
 
 ## v4.9.0 更新
 

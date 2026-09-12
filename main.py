@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-PS VR2 PC 控制面板 — PSVR2 Panel v4.9.0
+PS VR2 PC 控制面板 — PSVR2 Panel v4.9.1
 一键管理 PS VR2 在 PC 上的解锁功能，深度集成 PSVR2Toolkit 工具链
 
-v4.9.0 更新：
-  🎮 新增自定义快捷启动（VR 游戏/应用，exe 或 steam:// 链接）
-  🔔 托盘气泡通知（驱动切换/备份完成）
-  ⏰ 定期自动备份（默认 7 天，AUTO_BACKUP_INTERVAL_DAYS 可配）
-  🔇 --minimized 启动参数 + 开机自启静默进托盘
+v4.9.1 更新：
+  🛠 托盘未创建时的气泡通知入队补发（修复启动期自动备份通知丢失）
+  🛠 快捷方式保存失败回滚 + 损坏 shortcuts.json 自动备份为 .bak
+  🧹 review 清理：托盘图标置空/引号路径兼容/同名拒绝/withdraw 消除闪烁
+  ✅ 新增单元测试（17 例）+ CI 改为严格失败模式
 
 作者: Michael Qiu (cpufreestyle)
 """
@@ -39,7 +39,7 @@ from auto_updater import check_update_background
 # 常量 & 主题
 # ============================================================
 APP_NAME = "PSVR2 Panel"
-APP_VERSION = "4.9.0"
+APP_VERSION = "4.9.1"
 APP_AUTHOR = "Michael Qiu"
 GITEE_URL = "https://gitee.com/cpufreestyle/psvr2-panel"
 GITHUB_URL = "https://github.com/cpufreestyle/psvr2-panel"
@@ -919,32 +919,51 @@ class PSVR2Shortcuts:
 
     def load(self):
         self.items = []
-        if SHORTCUTS_FILE.exists():
+        if not SHORTCUTS_FILE.exists():
+            return
+        try:
+            with open(SHORTCUTS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, list):
+                self.items = [x for x in data
+                              if isinstance(x, dict) and x.get("name") and x.get("target")]
+        except Exception as e:
+            log.warning(f"快捷方式读取失败: {e}")
+            # 损坏文件改名保留，避免下次 save 覆盖导致无法恢复
             try:
-                with open(SHORTCUTS_FILE, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                if isinstance(data, list):
-                    self.items = [x for x in data
-                                  if isinstance(x, dict) and x.get("name") and x.get("target")]
-            except Exception as e:
-                log.warning(f"快捷方式读取失败: {e}")
+                SHORTCUTS_FILE.replace(SHORTCUTS_FILE.with_suffix(".json.bak"))
+                log.warning("损坏的 shortcuts.json 已备份为 shortcuts.json.bak")
+            except OSError:
+                pass
 
-    def save(self):
-        SHORTCUTS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        with open(SHORTCUTS_FILE, "w", encoding="utf-8") as f:
-            json.dump(self.items, f, ensure_ascii=False, indent=2)
-
-    def add(self, name: str, target: str) -> bool:
-        if any(x["target"].lower() == target.lower() for x in self.items):
+    def save(self) -> bool:
+        try:
+            SHORTCUTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+            with open(SHORTCUTS_FILE, "w", encoding="utf-8") as f:
+                json.dump(self.items, f, ensure_ascii=False, indent=2)
+            return True
+        except OSError as e:
+            log.error(f"快捷方式保存失败: {e}")
             return False
-        self.items.append({"name": name, "target": target})
-        self.save()
-        log.info(f"快捷方式已添加: {name} -> {target}")
-        return True
 
-    def remove(self, name: str):
+    def add(self, name: str, target: str) -> Tuple[bool, str]:
+        if any(x["name"] == name for x in self.items):
+            return False, "同名快捷方式已存在"
+        if any(x["target"].lower() == target.lower() for x in self.items):
+            return False, "该目标已存在"
+        self.items.append({"name": name, "target": target})
+        if not self.save():
+            self.items.pop()  # 回滚内存态，与磁盘保持一致
+            return False, "保存失败（文件写入错误）"
+        log.info(f"快捷方式已添加: {name} -> {target}")
+        return True, "ok"
+
+    def remove(self, name: str) -> bool:
+        before = len(self.items)
         self.items = [x for x in self.items if x["name"] != name]
-        self.save()
+        if len(self.items) == before:
+            return False
+        return self.save()
 
     def launch(self, index: int) -> bool:
         if 0 <= index < len(self.items):
@@ -1198,6 +1217,7 @@ class PSVR2Panel:
         self.sv_settings = SteamVRSettings()
         self.shortcuts = PSVR2Shortcuts()
         self._stop_monitor = threading.Event()
+        self._pending_notify: List[tuple] = []  # 托盘未创建时暂存的气泡通知
 
         self.root = tk.Tk()
         self.root.title(f"{APP_NAME} v{APP_VERSION}")
@@ -1205,6 +1225,9 @@ class PSVR2Panel:
         self.root.minsize(420, 580)
         self.root.configure(bg=C["bg"])
         self.root.protocol("WM_DELETE_WINDOW", self._on_close_request)
+        # --minimized：构建 UI 前先隐藏，避免登录时窗口闪烁
+        if start_minimized:
+            self.root.withdraw()
 
         self._setup_ttk_theme()
         self._build_ui()
@@ -1838,7 +1861,7 @@ class PSVR2Panel:
         threading.Thread(target=do_query, daemon=True).start()
 
     def _notify(self, message: str, title: str = None):
-        """托盘气泡通知（无托盘时降级为日志）"""
+        """托盘气泡通知（无托盘时入队，待托盘创建后补发；始终写日志）"""
         log.info(f"🔔 {message}")
         icon = getattr(self, "_tray_icon", None)
         if icon:
@@ -1846,6 +1869,8 @@ class PSVR2Panel:
                 icon.notify(message, title or APP_NAME)
             except Exception as e:
                 log.warning(f"气泡通知失败: {e}")
+        else:
+            self._pending_notify.append((message, title))
 
     # ── 健康检查 ────────────────────────────────────────
     def _run_health_check(self):
@@ -2317,17 +2342,19 @@ class PSVR2Panel:
             parent=self.root)
         if not target:
             return
+        target = target.strip().strip('"').strip()  # 兼容资源管理器"复制文件地址"的带引号路径
         default_name = Path(target.replace("steam://", "").rstrip("/")).stem \
             if "://" not in target else "Steam 内容"
         name = simpledialog.askstring("名称", "快捷方式名称:",
                                       initialvalue=default_name, parent=self.root)
         if not name:
             return
-        if self.shortcuts.add(name, target):
+        ok, msg = self.shortcuts.add(name.strip(), target)
+        if ok:
             self._refresh_shortcut_list()
-            self._notify(f"快捷方式已添加: {name}")
+            self._notify(f"快捷方式已添加: {name.strip()}")
         else:
-            messagebox.showwarning("提示", "该目标已存在")
+            messagebox.showwarning("提示", msg)
 
     def _launch_shortcut(self):
         sel = self.shortcut_listbox.curselection()
@@ -2344,8 +2371,10 @@ class PSVR2Panel:
             return
         name = self.shortcuts.items[sel[0]]["name"]
         if messagebox.askyesno("确认", f"删除快捷方式「{name}」？"):
-            self.shortcuts.remove(name)
-            self._refresh_shortcut_list()
+            if self.shortcuts.remove(name):
+                self._refresh_shortcut_list()
+            else:
+                messagebox.showwarning("提示", "删除失败（文件写入错误）")
 
     # ── 窗口关闭/托盘 ────────────────────────────────────
     def _on_close_request(self):
@@ -2389,6 +2418,13 @@ class PSVR2Panel:
         self.root.withdraw()
         self._tray_icon.run_detached()
         log.info("已最小化到系统托盘")
+        # 补发托盘创建前暂存的气泡通知
+        pending, self._pending_notify = self._pending_notify, []
+        for msg, t in pending:
+            try:
+                self._tray_icon.notify(msg, t or APP_NAME)
+            except Exception as e:
+                log.warning(f"气泡补发失败: {e}")
 
     def _auto_install_tray_deps(self):
         """托盘依赖缺失时自动 pip install pystray Pillow，成功后重试最小化"""
@@ -2424,8 +2460,9 @@ class PSVR2Panel:
                 "pip install pystray Pillow")
 
     def _restore_from_tray(self, icon=None, item=None):
-        if hasattr(self, "_tray_icon"):
+        if getattr(self, "_tray_icon", None):
             self._tray_icon.stop()
+            self._tray_icon = None  # 停止后置空，避免 _notify 作用于失效图标
         self.root.after(0, lambda: self.root.deiconify())
 
     def destroy(self):
@@ -2444,9 +2481,10 @@ class PSVR2Panel:
             f"{APP_NAME} v{APP_VERSION}\n\n"
             f"PlayStation VR2 PC 控制面板\n"
             f"深度集成 PSVR2Toolkit 工具链\n\n"
-            f"v4.9.0 更新：\n"
-            f"  🎮 自定义快捷启动 / 🔔 气泡通知\n"
-            f"  ⏰ 定期自动备份 / 🔇 --minimized 静默启动\n\n"
+            f"v4.9.1 更新：\n"
+            f"  🛠 启动期通知入队补发 / 快捷方式持久化加固\n"
+            f"  ✅ 新增 17 例单元测试 + CI 严格模式\n\n"
+            f"v4.9.0 更新：快捷启动 / 气泡通知 / 定期备份 / 静默启动\n"
             f"v4.8.1 更新：托盘依赖自动安装\n"
             f"v4.8.0 更新：HDR 检测与开关（DisplayConfig API）\n"
             f"v4.7.0 更新：Toolkit 调节面板（亮度 + 5 项开关）\n"
