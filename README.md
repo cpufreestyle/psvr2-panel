@@ -1,4 +1,4 @@
-# PS VR2 PC 控制面板 v4.9.2
+# PS VR2 PC 控制面板 v4.10.0
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Python Version](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/downloads/)
@@ -12,6 +12,7 @@ PlayStation VR2 PC 管理工具，一键解锁 PS VR2 在 PC 上的隐藏功能�
 - ✅ 驱动备份/恢复（时间戳快照管理）
 - ✅ SteamVR 快速设置（渲染缩放/超采样/运动平滑）
 - ✅ **Toolkit 调节面板**（屏幕亮度 + 禁用安全区/Sense/眼动 + LED 同步 + 增强触觉，键名查证自官方源码）
+- ✅ **刷新率切换**（120/90/72/60Hz 运行时切换，Toolkit 解锁 + NVIDIA 专用；低刷新率+运动平滑=补帧替代）
 - ✅ **HDR 检测与开关**（Windows 高级色彩，DisplayConfig API；PSVR2 EDID 未暴露 HDR10 时诚实置灰）
 - ✅ SteamVR / VRCFaceTracking 进程监控
 - ✅ 一键启动 SteamVR + VRCFaceTracking
@@ -39,7 +40,7 @@ PlayStation VR2 PC 管理工具，一键解锁 PS VR2 在 PC 上的隐藏功能�
 
 ### 🎯 推荐：直接下载 exe（无需 Python）
 
-前往 [GitHub Releases](https://github.com/cpufreestyle/psvr2-panel/releases) 下载最新版本的 `PSVR2-Panel-v4.9.2.exe`，双击即可运行。
+前往 [GitHub Releases](https://github.com/cpufreestyle/psvr2-panel/releases) 下载最新版本的 `PSVR2-Panel-v4.10.0.exe`，双击即可运行。
 
 ### 💻 从源码运行
 
@@ -61,6 +62,12 @@ python main.py
 - Windows 10/11 64位
 - Python 3.10+（Pillow 12 要求；exe 版无需 Python）
 - tkinter（Python 内置）
+
+## v4.10.0 更新
+
+| 类别 | 更新内容 |
+|------|---------|
+| ⚡ 性能 | 新增刷新率切换卡片：120/90/72/60Hz 运行时切换（写入 `steamvr.refreshRate`）。机制查证自 PSVR2Toolkit 源码——驱动声明 `Prop_DisplaySupportsRuntimeFramerateChange` 解锁 SteamVR 原生刷新率选项（NVIDIA 专用）。低刷新率 + 运动平滑 = VR 补帧的可行替代路径 |
 
 ## v4.9.2 更新
 

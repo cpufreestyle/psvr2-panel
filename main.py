@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-PS VR2 PC 控制面板 — PSVR2 Panel v4.9.2
+PS VR2 PC 控制面板 — PSVR2 Panel v4.10.0
 一键管理 PS VR2 在 PC 上的解锁功能，深度集成 PSVR2Toolkit 工具链
 
-v4.9.2 更新：
-  🔒 单实例互斥锁（重复启动静默退出/弹提示）
-  ♻️ 旧格式自启条目启动时静默迁移为新格式
+v4.10.0 更新：
+  ⚡ 新增刷新率切换卡片（120/90/72/60Hz，steamvr.refreshRate，
+     Toolkit 解锁运行时刷新率，NVIDIA 专用；低刷新率+运动平滑=补帧替代）
 
 作者: Michael Qiu (cpufreestyle)
 """
@@ -37,7 +37,7 @@ from auto_updater import check_update_background
 # 常量 & 主题
 # ============================================================
 APP_NAME = "PSVR2 Panel"
-APP_VERSION = "4.9.2"
+APP_VERSION = "4.10.0"
 APP_AUTHOR = "Michael Qiu"
 GITEE_URL = "https://gitee.com/cpufreestyle/psvr2-panel"
 GITHUB_URL = "https://github.com/cpufreestyle/psvr2-panel"
@@ -1605,6 +1605,23 @@ class PSVR2Panel:
         btn_frame_tk.pack(fill="x", pady=(10, 0))
         btn(btn_frame_tk, "💾 应用 Toolkit 设置", self._apply_toolkit_settings, "green", 16).pack(anchor="w")
 
+        # 刷新率切换（Toolkit 解锁 SteamVR 运行时刷新率，NVIDIA 专用）
+        _, crr = card(p, "⚡ 刷新率")
+        tk.Label(crr, text="Toolkit 解锁运行时刷新率（NVIDIA 专用）；低刷新率 + 运动平滑 = 补帧替代",
+                 font=("Microsoft YaHei", 8),
+                 fg=C["text_sub"], bg=C["card"]).pack(anchor="w", pady=(0, 4))
+        rr_frame = tk.Frame(crr, bg=C["card"])
+        rr_frame.pack(fill="x")
+        self.refresh_rate_var = tk.IntVar(
+            value=int(self.sv_settings.get_in_section("steamvr", "refreshRate", 0)))
+        for i, (idx, label) in enumerate([(0, "120Hz"), (1, "90Hz"), (2, "72Hz"), (3, "60Hz")]):
+            ttk.Radiobutton(rr_frame, text=label, value=idx,
+                            variable=self.refresh_rate_var).grid(row=0, column=i, padx=(0, 10))
+        btn(crr, "💾 应用刷新率", self._apply_refresh_rate, "green", 14).pack(anchor="w", pady=(8, 0))
+        tk.Label(crr, text="写入 steamvr.refreshRate（0=120Hz 1=90Hz 2=72Hz 3=60Hz），重启 SteamVR 生效",
+                 font=("Microsoft YaHei", 8),
+                 fg=C["text_sub"], bg=C["card"]).pack(anchor="w", pady=(4, 0))
+
         if not self.sv_settings.path:
             tk.Label(c, text="⚠ SteamVR 设置文件未找到",
                      font=("Microsoft YaHei", 8), fg=C["yellow"],
@@ -2123,6 +2140,19 @@ class PSVR2Panel:
         else:
             messagebox.showerror("Toolkit 设置", msg)
 
+    # ── 刷新率 ──────────────────────────────────────────
+    def _apply_refresh_rate(self):
+        self.sv_settings.load()
+        self.sv_settings.set_in_section("steamvr", "refreshRate",
+                                        self.refresh_rate_var.get())
+        success, msg = self.sv_settings.save()
+        if success:
+            messagebox.showinfo("刷新率",
+                f"已保存（重启 SteamVR 生效）\n\n"
+                f"提示：60/72Hz 配合运动平滑可获得低负载下的流畅体验")
+        else:
+            messagebox.showerror("刷新率", msg)
+
     # ── 系统选项 ────────────────────────────────────────
     def _save_profile(self):
         name = self.profile_combo.get()
@@ -2499,8 +2529,9 @@ class PSVR2Panel:
             f"{APP_NAME} v{APP_VERSION}\n\n"
             f"PlayStation VR2 PC 控制面板\n"
             f"深度集成 PSVR2Toolkit 工具链\n\n"
-            f"v4.9.2 更新：\n"
-            f"  🔒 单实例互斥锁 / ♻️ 自启条目迁移\n\n"
+            f"v4.10.0 更新：\n"
+            f"  ⚡ 刷新率切换卡片（120/90/72/60Hz）\n\n"
+            f"v4.9.2 更新：单实例互斥锁 / 自启条目迁移\n"
             f"v4.9.1 更新：通知队列 / 持久化加固 / 单元测试\n"
             f"v4.9.0 更新：快捷启动 / 气泡通知 / 定期备份 / 静默启动\n"
             f"v4.8.1 更新：托盘依赖自动安装\n"
