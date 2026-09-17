@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-PS VR2 PC 控制面板 — PSVR2 Panel v4.10.0
+PS VR2 PC 控制面板 — PSVR2 Panel v4.11.0
 一键管理 PS VR2 在 PC 上的解锁功能，深度集成 PSVR2Toolkit 工具链
 
-v4.10.0 更新：
-  ⚡ 新增刷新率切换卡片（120/90/72/60Hz，steamvr.refreshRate，
-     Toolkit 解锁运行时刷新率，NVIDIA 专用；低刷新率+运动平滑=补帧替代）
+v4.11.0 更新：
+  🚀 一键准备并启动（检查驱动 → 拉起 VRCFT → 启动 SteamVR）
+  🧰 SteamVR 急救（僵死进程清理 / 驱动注册检测 / 设置重置+备份）
+  📦 配置预设扩展为完整档位（含刷新率与 Toolkit 开关）
+  🔌 USB 连接诊断（解析头显 USB 控制器/端口链路）
 
 作者: Michael Qiu (cpufreestyle)
 """
@@ -37,7 +39,7 @@ from auto_updater import check_update_background
 # 常量 & 主题
 # ============================================================
 APP_NAME = "PSVR2 Panel"
-APP_VERSION = "4.10.0"
+APP_VERSION = "4.11.0"
 APP_AUTHOR = "Michael Qiu"
 GITEE_URL = "https://gitee.com/cpufreestyle/psvr2-panel"
 GITHUB_URL = "https://github.com/cpufreestyle/psvr2-panel"
@@ -1142,7 +1144,9 @@ class SteamVRSettings:
         p = PROFILE_DIR / f"{safe}.json"
         with open(p, "w", encoding="utf-8") as f:
             json.dump({"name": safe, "created": datetime.now().isoformat(),
-                       "settings": self.data.get("steamvr", {})}, f, ensure_ascii=False, indent=2)
+                       "settings": self.data.get("steamvr", {}),
+                       "toolkit": self.data.get("playstation_vr2_ex", {})},
+                      f, ensure_ascii=False, indent=2)
         log.info(f"预设已保存: {safe}")
         return True, f"预设「{safe}」已保存"
 
@@ -1157,6 +1161,9 @@ class SteamVRSettings:
         if "steamvr" not in self.data:
             self.data["steamvr"] = {}
         self.data["steamvr"].update(data.get("settings", {}))
+        if "playstation_vr2_ex" not in self.data:
+            self.data["playstation_vr2_ex"] = {}
+        self.data["playstation_vr2_ex"].update(data.get("toolkit", {}))
         success, msg = self.save()
         if success:
             return True, f"预设「{safe}」已应用（重启 SteamVR 生效）"
@@ -1381,6 +1388,14 @@ class PSVR2Panel:
                                    font=("Microsoft YaHei", 9, "bold"),
                                    fg=C["text"], bg=C["card"])
         self.vrcft_lbl.pack(side="right")
+
+        # USB 连接诊断
+        _, cusb = card(p, "🔌 USB 连接诊断")
+        tk.Label(cusb, text="解析头显所在 USB 控制器/端口链路（PSVR2 对 USB 口敏感，可辅助排障）",
+                 font=("Microsoft YaHei", 8),
+                 fg=C["text_sub"], bg=C["card"]).pack(anchor="w", pady=(0, 6))
+        self.usb_btn = btn(cusb, "🔌 运行 USB 诊断", self._usb_diagnose, "teal", 14)
+        self.usb_btn.pack(anchor="w")
 
         # 功能状态
         _, feat_c = card(p, "📊 功能解锁状态")
@@ -1622,6 +1637,23 @@ class PSVR2Panel:
                  font=("Microsoft YaHei", 8),
                  fg=C["text_sub"], bg=C["card"]).pack(anchor="w", pady=(4, 0))
 
+        # SteamVR 急救
+        _, cfa = card(p, "🧰 SteamVR 急救")
+        tk.Label(cfa, text="SteamVR 起不来 / 卡死 / 设置异常时的快速处置",
+                 font=("Microsoft YaHei", 8),
+                 fg=C["text_sub"], bg=C["card"]).pack(anchor="w", pady=(0, 6))
+        fa_row = tk.Frame(cfa, bg=C["card"])
+        fa_row.pack(fill="x")
+        btn(fa_row, "🧹 清理僵死进程", self._kill_zombie_vr, "orange", 13).pack(
+            side="left", padx=(0, 4))
+        btn(fa_row, "🔎 驱动注册检测", self._check_driver_registry, "accent", 13).pack(
+            side="left", padx=(0, 4))
+        btn(fa_row, "♻ 重置 SteamVR 设置", self._reset_vr_settings, "red", 16).pack(
+            side="left")
+        tk.Label(cfa, text="重置会在同目录生成 .vrsettings.bak 备份，SteamVR 下次启动重建默认设置",
+                 font=("Microsoft YaHei", 8),
+                 fg=C["text_sub"], bg=C["card"]).pack(anchor="w", pady=(4, 0))
+
         if not self.sv_settings.path:
             tk.Label(c, text="⚠ SteamVR 设置文件未找到",
                      font=("Microsoft YaHei", 8), fg=C["yellow"],
@@ -1650,7 +1682,11 @@ class PSVR2Panel:
 
         # 一键启动
         _, c3 = card(p, "🚀 快速启动")
-        btn(c3, "🚀 启动 SteamVR + VRCFT", self._launch_all, "green").pack(fill="x", pady=2)
+        self.prepare_btn = btn(c3, "🚀 一键准备并启动", self._prepare_and_launch, "green")
+        self.prepare_btn.pack(fill="x", pady=2)
+        tk.Label(c3, text="自动检查驱动状态 → 拉起 VRCFT → 启动 SteamVR",
+                 font=("Microsoft YaHei", 8),
+                 fg=C["text_sub"], bg=C["card"]).pack(anchor="w", pady=(0, 4))
         startup_frame = tk.Frame(c3, bg=C["card"])
         startup_frame.pack(fill="x", pady=(4, 0))
         btn(startup_frame, "SteamVR", self._launch_steamvr, "accent", 9).pack(side="left", padx=(0, 4))
@@ -1907,6 +1943,61 @@ class PSVR2Panel:
         else:
             self._pending_notify.append((message, title))
 
+    # ── USB 连接诊断 ────────────────────────────────────
+    def _usb_diagnose(self):
+        """解析 PSVR2 设备的 USB 父链（设备 → 集线器 → 控制器）"""
+        self.usb_btn.config(state="disabled", text="诊断中...")
+        ps = (
+            "$out=@(); "
+            "foreach ($d in (Get-PnpDevice | Where-Object {$_.FriendlyName -match "
+            "'PlayStation|PSVR|VR2' -and $_.Status -eq 'OK'})) { "
+            "$chain=@(); $cur=$d; $i=0; "
+            "while ($cur -and $i -lt 8) { "
+            "$chain += ('{0} [{1}]' -f $cur.FriendlyName, $cur.Status); $i++; "
+            "$parentId=(Get-PnpDeviceProperty -InstanceId $cur.InstanceId "
+            "-KeyName 'DEVPKEY_Device_Parent' -ErrorAction SilentlyContinue).Data; "
+            "if (-not $parentId) { break }; "
+            "$cur=Get-PnpDevice -InstanceId $parentId -ErrorAction SilentlyContinue }; "
+            "$out += ($chain -join '||') }; "
+            "$out | ConvertTo-Json -Compress"
+        )
+        def do_scan():
+            try:
+                r = _run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+                         timeout=40)
+                raw = (r.stdout or "").strip()
+                chains = []
+                if raw:
+                    data = json.loads(raw)
+                    if isinstance(data, str):
+                        data = [data]
+                    chains = [c.split("||") for c in data if c]
+            except Exception as e:
+                log.warning(f"USB 诊断失败: {e}")
+                chains = []
+            self.root.after(0, self._show_usb_report, chains)
+        threading.Thread(target=do_scan, daemon=True).start()
+
+    def _show_usb_report(self, chains: List[List[str]]):
+        self.usb_btn.config(state="normal", text="🔌 运行 USB 诊断")
+        if not chains:
+            messagebox.showwarning("USB 诊断",
+                "未发现已连接的 PSVR2 设备\n\n请确认头显已连接（USB + DP）")
+            return
+        lines = ["🔌 PSVR2 USB 链路诊断", "=" * 34]
+        for chain in chains:
+            lines.append("")
+            for depth, node in enumerate(chain):
+                lines.append(("  " * depth) + ("└ " if depth else "📦 ") + node)
+        lines += ["", "=" * 34,
+                  "建议：头显尽量接主板直连的 USB 3.0 口；",
+                  "若链路中出现集线器或状态异常，请更换端口重试。"]
+        report = "\n".join(lines)
+        self.root.clipboard_clear()
+        self.root.clipboard_append(report)
+        log.info("USB 诊断完成:\n" + report)
+        messagebox.showinfo("USB 诊断", report + "\n\n📋 报告已复制到剪贴板")
+
     # ── 健康检查 ────────────────────────────────────────
     def _run_health_check(self):
         def diagnose():
@@ -2099,15 +2190,57 @@ class PSVR2Panel:
         self.scale_lbl.config(text=f"{int(val * 100)}%")
 
     def _apply_sv_settings(self):
-        self.sv_settings.load()
-        self.sv_settings.set("renderTargetMultiplier", self.sample_scale.get())
-        self.sv_settings.set("allowSupersampleFiltering", self.cb_filter.get())
-        self.sv_settings.set("motionSmoothing", self.cb_smooth.get())
+        self._sync_settings_from_ui()
         success, msg = self.sv_settings.save()
         if success:
             messagebox.showinfo("设置", msg)
         else:
             messagebox.showerror("设置失败", msg)
+
+    # ── 设置双向同步（UI <-> 设置对象）──────────────────
+    def _sync_settings_from_ui(self):
+        """把 UI 控件当前值写入设置对象（不落盘）"""
+        self.sv_settings.load()
+        self.sv_settings.set("renderTargetMultiplier", self.sample_scale.get())
+        self.sv_settings.set("allowSupersampleFiltering", self.cb_filter.get())
+        self.sv_settings.set("motionSmoothing", self.cb_smooth.get())
+        self.sv_settings.set_in_section("steamvr", "analogGain",
+                                        self.tk_brightness.get())
+        self.sv_settings.set_in_section("steamvr", "refreshRate",
+                                        self.refresh_rate_var.get())
+        self.sv_settings.set_in_section("playstation_vr2_ex", "disableChaperone",
+                                        self.tk_chaperone.get())
+        self.sv_settings.set_in_section("playstation_vr2_ex", "disableSense",
+                                        self.tk_sense.get())
+        self.sv_settings.set_in_section("playstation_vr2_ex", "disableGaze",
+                                        self.tk_gaze.get())
+        self.sv_settings.set_in_section("playstation_vr2_ex", "useToolkitSync",
+                                        self.tk_sync.get())
+        self.sv_settings.set_in_section("playstation_vr2_ex", "useEnhancedHaptics",
+                                        self.tk_haptics.get())
+
+    def _apply_settings_to_ui(self):
+        """把设置对象当前值回填到 UI 控件（加载预设后调用）"""
+        self.sample_scale.set(float(self.sv_settings.get("renderTargetMultiplier", 1.0)))
+        self.cb_filter.set(bool(self.sv_settings.get("allowSupersampleFiltering", True)))
+        self.cb_smooth.set(bool(self.sv_settings.get("motionSmoothing", True)))
+        self._update_scale_lbl()
+        self.tk_brightness.set(
+            float(self.sv_settings.get_in_section("steamvr", "analogGain", 1.0)))
+        self._update_bri_lbl()
+        self.refresh_rate_var.set(
+            int(self.sv_settings.get_in_section("steamvr", "refreshRate", 0)))
+        sec = "playstation_vr2_ex"
+        self.tk_chaperone.set(
+            bool(self.sv_settings.get_in_section(sec, "disableChaperone", False)))
+        self.tk_sense.set(
+            bool(self.sv_settings.get_in_section(sec, "disableSense", False)))
+        self.tk_gaze.set(
+            bool(self.sv_settings.get_in_section(sec, "disableGaze", False)))
+        self.tk_sync.set(
+            bool(self.sv_settings.get_in_section(sec, "useToolkitSync", True)))
+        self.tk_haptics.set(
+            bool(self.sv_settings.get_in_section(sec, "useEnhancedHaptics", True)))
 
     def _reset_sv_settings(self):
         self.sample_scale.set(1.0)
@@ -2121,19 +2254,7 @@ class PSVR2Panel:
         self.bri_lbl.config(text=f"{int(self.tk_brightness.get() * 100)}%")
 
     def _apply_toolkit_settings(self):
-        self.sv_settings.load()
-        self.sv_settings.set_in_section("steamvr", "analogGain",
-                                        self.tk_brightness.get())
-        self.sv_settings.set_in_section("playstation_vr2_ex", "disableChaperone",
-                                        self.tk_chaperone.get())
-        self.sv_settings.set_in_section("playstation_vr2_ex", "disableSense",
-                                        self.tk_sense.get())
-        self.sv_settings.set_in_section("playstation_vr2_ex", "disableGaze",
-                                        self.tk_gaze.get())
-        self.sv_settings.set_in_section("playstation_vr2_ex", "useToolkitSync",
-                                        self.tk_sync.get())
-        self.sv_settings.set_in_section("playstation_vr2_ex", "useEnhancedHaptics",
-                                        self.tk_haptics.get())
+        self._sync_settings_from_ui()
         success, msg = self.sv_settings.save()
         if success:
             messagebox.showinfo("Toolkit 设置", "已保存（重启 SteamVR 生效）")
@@ -2142,9 +2263,7 @@ class PSVR2Panel:
 
     # ── 刷新率 ──────────────────────────────────────────
     def _apply_refresh_rate(self):
-        self.sv_settings.load()
-        self.sv_settings.set_in_section("steamvr", "refreshRate",
-                                        self.refresh_rate_var.get())
+        self._sync_settings_from_ui()
         success, msg = self.sv_settings.save()
         if success:
             messagebox.showinfo("刷新率",
@@ -2153,12 +2272,98 @@ class PSVR2Panel:
         else:
             messagebox.showerror("刷新率", msg)
 
+    # ── SteamVR 急救 ────────────────────────────────────
+    def _kill_zombie_vr(self):
+        """清理僵死的 SteamVR 进程（vrserver 等）"""
+        names = ["vrserver.exe", "vrcompositor.exe", "vrdashboard.exe",
+                 "vrwebhelper.exe", "vrmonitor.exe"]
+        running = [n for n in names if _process_running(n)]
+        if not running:
+            messagebox.showinfo("SteamVR 急救", "未发现运行中的 SteamVR 进程")
+            return
+        if not messagebox.askyesno("确认",
+                "将强制结束以下进程（用于解除卡死）：\n\n"
+                + "\n".join(running) + "\n\n继续？"):
+            return
+        self._notify(f"正在结束 {len(running)} 个 SteamVR 进程...")
+
+        def do_kill():
+            killed = []
+            for n in running:
+                r = _run(["taskkill", "/F", "/IM", n], timeout=10)
+                if r.returncode == 0:
+                    killed.append(n)
+            time.sleep(1)
+            self.root.after(0, self._on_zombie_killed, killed)
+        threading.Thread(target=do_kill, daemon=True).start()
+
+    def _on_zombie_killed(self, killed: List[str]):
+        self._run_detection()
+        if killed:
+            self._notify(f"已结束 {len(killed)} 个 SteamVR 进程")
+            messagebox.showinfo("SteamVR 急救",
+                                "已结束：\n" + "\n".join(killed))
+        else:
+            messagebox.showwarning("SteamVR 急救", "未能结束任何进程（可能需要管理员权限）")
+
+    def _check_driver_registry(self):
+        """检查 SteamVR 外部驱动注册状态（openvrpaths.vrpath）"""
+        p = Path(os.environ.get("LOCALAPPDATA", "")) / "openvr" / "openvrpaths.vrpath"
+        if not p.exists():
+            messagebox.showwarning("驱动注册",
+                f"未找到 openvrpaths.vrpath\n\n{p}\n\n"
+                "请先运行一次 SteamVR 使其生成配置文件")
+            return
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+            drivers = data.get("external_drivers") or []
+            hit = [d for d in drivers
+                   if "playstation" in d.lower() or "psvr" in d.lower()]
+            if hit:
+                messagebox.showinfo("驱动注册",
+                    "✅ 已注册 PlayStation VR2 外部驱动：\n\n" + "\n".join(hit))
+            else:
+                messagebox.showwarning("驱动注册",
+                    "⚠ 未在 openvrpaths.vrpath 中找到 PlayStation VR2 驱动\n\n"
+                    "已注册驱动：\n" + ("\n".join(drivers) if drivers else "（无）")
+                    + "\n\n可尝试重新安装 PlayStation VR2 App")
+        except Exception as e:
+            messagebox.showerror("驱动注册", f"读取失败：{e}")
+
+    def _reset_vr_settings(self):
+        """重置 SteamVR 设置文件（备份为 .bak 后删除，SteamVR 会重建默认值）"""
+        p = _steamvr_settings_path()
+        if not p:
+            messagebox.showwarning("重置设置",
+                "未找到 openvrsettings.vrsettings\n（SteamVR 可能尚未运行过）")
+            return
+        if not messagebox.askyesno("确认",
+                f"将备份并重置 SteamVR 设置：\n\n{p}\n\n"
+                "备份为同目录 .vrsettings.bak，SteamVR 下次启动会重建默认设置。\n"
+                "面板中的渲染缩放 / 刷新率 / Toolkit 参数也会回到默认。\n\n继续？"):
+            return
+        try:
+            bak = p.with_suffix(".vrsettings.bak")
+            shutil.copy2(p, bak)
+            p.unlink()
+            self.sv_settings = SteamVRSettings()
+            self.sv_settings.load()
+            self._apply_settings_to_ui()
+            self._notify("SteamVR 设置已重置（原文件已备份）")
+            messagebox.showinfo("重置设置",
+                                f"已重置。\n\n备份：{bak}")
+        except OSError as e:
+            messagebox.showerror("重置设置",
+                                 f"重置失败（文件可能被占用，先关闭 SteamVR）：{e}")
+
     # ── 系统选项 ────────────────────────────────────────
     def _save_profile(self):
         name = self.profile_combo.get()
         if not name:
             name = simpledialog.askstring("预设名称", "请输入预设名称:", parent=self.root)
         if name:
+            # 先同步当前 UI 值，确保预设捕获"所见"的完整档位
+            self._sync_settings_from_ui()
             success, msg = self.sv_settings.save_profile(name)
             if success:
                 self.profile_combo.config(values=self.sv_settings.list_profiles())
@@ -2174,10 +2379,7 @@ class PSVR2Panel:
         success, msg = self.sv_settings.load_profile(name)
         if success:
             self.sv_settings.load()
-            self.sample_scale.set(float(self.sv_settings.get("renderTargetMultiplier", 1.0)))
-            self.cb_filter.set(bool(self.sv_settings.get("allowSupersampleFiltering", True)))
-            self.cb_smooth.set(bool(self.sv_settings.get("motionSmoothing", True)))
-            self._update_scale_lbl()
+            self._apply_settings_to_ui()
             messagebox.showinfo("预设", msg)
         else:
             messagebox.showerror("失败", msg)
@@ -2264,6 +2466,71 @@ class PSVR2Panel:
         self._do_launch_steamvr()
         time.sleep(2)
         self._do_launch_vrcft()
+
+    def _prepare_and_launch(self):
+        """一键准备并启动：检查驱动 → 拉起 VRCFT → 启动 SteamVR（全程无弹窗噪音）"""
+        self.prepare_btn.config(state="disabled", text="准备中...")
+
+        def do_prepare():
+            notes = []
+            try:
+                self.detector.detect_all()
+                tk = self.detector.toolkit
+                if not tk.driver_installed:
+                    notes.append("❌ 未检测到 PS VR2 驱动目录，已中止启动")
+                    self.root.after(0, self._on_prepare_done, notes, False)
+                    return
+                notes.append(f"✅ 驱动：{tk.driver_version}")
+                if not tk.toolkit_active:
+                    notes.append("⚠ 当前为官方驱动（眼动/HDR 等未解锁）")
+
+                vrcft = self.detector.vrcft
+                if vrcft.is_running:
+                    notes.append("ℹ VRCFT 已在运行")
+                elif vrcft.installed:
+                    if vrcft.launch():
+                        notes.append("▶ 已拉起 VRCFT")
+                    else:
+                        notes.append("⚠ VRCFT 启动失败")
+                else:
+                    notes.append("⚠ 未安装 VRCFT（已跳过）")
+
+                time.sleep(2)
+
+                if self.detector.steamvr.is_running:
+                    notes.append("ℹ SteamVR 已在运行")
+                else:
+                    started = False
+                    for p in STEAMVR_PATHS:
+                        if os.path.exists(p):
+                            _popen([p])
+                            started = True
+                            break
+                    if not started:
+                        try:
+                            os.startfile("steam://rungameid/250820")
+                            started = True
+                        except Exception as e:
+                            log.warning(f"SteamVR 启动失败: {e}")
+                    notes.append("▶ 已启动 SteamVR" if started
+                                 else "❌ SteamVR 启动失败（未安装？）")
+                time.sleep(2)
+            except Exception as e:
+                log.exception("准备启动失败")
+                notes.append(f"❌ 异常：{e}")
+            self.root.after(0, self._on_prepare_done, notes, True)
+        threading.Thread(target=do_prepare, daemon=True).start()
+
+    def _on_prepare_done(self, notes: List[str], ok: bool):
+        self.prepare_btn.config(state="normal", text="🚀 一键准备并启动")
+        self._run_detection()
+        report = "\n".join(notes)
+        log.info("一键准备完成:\n" + report)
+        if ok:
+            self._notify("已准备并启动 VR 环境")
+            messagebox.showinfo("一键准备并启动", report)
+        else:
+            messagebox.showwarning("一键准备并启动", report)
 
     def _open_vrcft_steam(self):
         try:
@@ -2529,8 +2796,10 @@ class PSVR2Panel:
             f"{APP_NAME} v{APP_VERSION}\n\n"
             f"PlayStation VR2 PC 控制面板\n"
             f"深度集成 PSVR2Toolkit 工具链\n\n"
-            f"v4.10.0 更新：\n"
-            f"  ⚡ 刷新率切换卡片（120/90/72/60Hz）\n\n"
+            f"v4.11.0 更新：\n"
+            f"  🚀 一键准备并启动 / 🧰 SteamVR 急救\n"
+            f"  📦 预设完整档位 / 🔌 USB 连接诊断\n\n"
+            f"v4.10.0 更新：刷新率切换（120/90/72/60Hz）\n"
             f"v4.9.2 更新：单实例互斥锁 / 自启条目迁移\n"
             f"v4.9.1 更新：通知队列 / 持久化加固 / 单元测试\n"
             f"v4.9.0 更新：快捷启动 / 气泡通知 / 定期备份 / 静默启动\n"

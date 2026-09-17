@@ -1,4 +1,4 @@
-# PS VR2 PC 控制面板 v4.10.0
+# PS VR2 PC 控制面板 v4.11.0
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Python Version](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/downloads/)
@@ -34,13 +34,17 @@ PlayStation VR2 PC 管理工具，一键解锁 PS VR2 在 PC 上的隐藏功能�
 - ✅ **托盘气泡通知**（驱动切换/备份完成时弹出）
 - ✅ **定期自动备份**（默认 7 天未备份自动创建）
 - ✅ **--minimized 静默启动**（开机自启直进托盘）
+- ✅ **一键准备并启动**（检查驱动 → 拉起 VRCFT → 启动 SteamVR）
+- ✅ **SteamVR 急救**（僵死进程清理 / 驱动注册检测 / 设置重置+自动备份）
+- ✅ **USB 连接诊断**（解析头显 USB 控制器与端口链路）
+- ✅ **配置预设完整档位**（渲染缩放 + 平滑 + 刷新率 + Toolkit 开关一键切换）
 - ✅ 可滚动画布（界面内容再多不被裁剪）
 
 ## 安装
 
 ### 🎯 推荐：直接下载 exe（无需 Python）
 
-前往 [GitHub Releases](https://github.com/cpufreestyle/psvr2-panel/releases) 下载最新版本的 `PSVR2-Panel-v4.10.0.exe`，双击即可运行。
+前往 [GitHub Releases](https://github.com/cpufreestyle/psvr2-panel/releases) 下载最新版本的 `PSVR2-Panel-v4.11.0.exe`，双击即可运行。
 
 ### 💻 从源码运行
 
@@ -62,6 +66,15 @@ python main.py
 - Windows 10/11 64位
 - Python 3.10+（Pillow 12 要求；exe 版无需 Python）
 - tkinter（Python 内置）
+
+## v4.11.0 更新
+
+| 类别 | 更新内容 |
+|------|---------|
+| 🚀 启动 | 一键准备并启动：自动检查驱动状态 → 拉起 VRCFT → 启动 SteamVR，并给出逐项结果报告（替代原“启动 SteamVR + VRCFT”） |
+| 🧰 急救 | SteamVR 急救卡片：清理僵死进程（vrserver 等）/ 检测外部驱动注册状态（openvrpaths.vrpath）/ 重置设置文件（自动 .vrsettings.bak 备份） |
+| 📦 预设 | 配置预设扩展为**完整档位**：除渲染缩放/平滑外，纳入刷新率、亮度与 5 项 Toolkit 开关；保存时捕获当前 UI 状态，加载时完整回填 |
+| 🔌 诊断 | USB 连接诊断：解析 PSVR2 设备的 USB 父链（设备 → 集线器 → 控制器），报告可复制，辅助排查 USB 口不稳导致的断连/黑屏 |
 
 ## v4.10.0 更新
 
