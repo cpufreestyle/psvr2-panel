@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-PS VR2 PC 控制面板 — PSVR2 Panel v4.11.0
+PS VR2 PC 控制面板 — PSVR2 Panel v4.12.0
 一键管理 PS VR2 在 PC 上的解锁功能，深度集成 PSVR2Toolkit 工具链
 
-v4.11.0 更新：
-  🚀 一键准备并启动（检查驱动 → 拉起 VRCFT → 启动 SteamVR）
-  🧰 SteamVR 急救（僵死进程清理 / 驱动注册检测 / 设置重置+备份）
-  📦 配置预设扩展为完整档位（含刷新率与 Toolkit 开关）
-  🔌 USB 连接诊断（解析头显 USB 控制器/端口链路）
+v4.12.0 更新：
+  👁 眼动链路可视化（头显→Toolkit→VRCFT→模块→VRChat 逐环节检查）
+  🔋 设备电量 & 帧统计（openvr 官方 API，SteamVR 运行时实时读取）
+     含丢帧率提示与超采样/刷新率建议
+  🧹 清理死代码（_launch_all/_do_launch_all 已随一键准备替代移除）
 
 作者: Michael Qiu (cpufreestyle)
 """
@@ -39,7 +39,7 @@ from auto_updater import check_update_background
 # 常量 & 主题
 # ============================================================
 APP_NAME = "PSVR2 Panel"
-APP_VERSION = "4.11.0"
+APP_VERSION = "4.12.0"
 APP_AUTHOR = "Michael Qiu"
 GITEE_URL = "https://gitee.com/cpufreestyle/psvr2-panel"
 GITHUB_URL = "https://github.com/cpufreestyle/psvr2-panel"
@@ -1013,6 +1013,69 @@ class SteamVRMonitor:
 
 
 # ============================================================
+# VR 实时数据（openvr 官方 API：设备电量 + 帧统计）
+# ============================================================
+VRCHAT_OSC_PORT = 9000  # VRChat OSC 发送 / VRCFT 监听端口
+
+
+def _osc_port_listening() -> bool:
+    """检测是否有进程监听 OSC 端口（UDP 9000，VRCFT 接收 VRChat 数据）"""
+    r = _run(["netstat", "-ano", "-p", "UDP"], timeout=8)
+    if r.returncode != 0 or not r.stdout:
+        return False
+    for line in r.stdout.splitlines():
+        parts = line.split()
+        if len(parts) >= 2 and parts[0] == "UDP" \
+                and parts[1].endswith(f":{VRCHAT_OSC_PORT}"):
+            return True
+    return False
+
+
+def _query_vr_devices() -> Optional[Dict]:
+    """通过 openvr Background 会话读取设备电量与帧统计（需 SteamVR 运行中）
+
+    返回 {"devices": [{"name", "battery", "charging"}...],
+          "dropped_frames": int, "presented_frames": int} 或 None（SteamVR 未运行）
+    """
+    try:
+        import openvr
+    except ImportError:
+        return None
+    try:
+        system = openvr.init(openvr.VRApplication_Background)
+        try:
+            devices = []
+            for idx in range(openvr.k_unMaxTrackedDeviceCount):
+                if not system.isTrackedDeviceConnected(idx):
+                    continue
+                cls = system.getTrackedDeviceClass(idx)
+                if cls not in (openvr.TrackedDeviceClass_Controller,
+                               openvr.TrackedDeviceClass_HMD):
+                    continue
+                name = system.getStringTrackedDeviceProperty(
+                    idx, openvr.Prop_ModelNumber_String) or f"Device {idx}"
+                battery = system.getFloatTrackedDeviceProperty(
+                    idx, openvr.Prop_DeviceBatteryPercentage_Float)
+                charging = bool(system.getBoolTrackedDeviceProperty(
+                    idx, openvr.Prop_DeviceIsCharging_Bool))
+                devices.append({"index": idx, "name": name,
+                                "battery": battery, "charging": charging})
+            comp = openvr.VRCompositor()
+            timing = openvr.Compositor_FrameTiming()
+            comp.getFrameTiming(timing, 0)
+            return {
+                "devices": devices,
+                "dropped": timing.m_nNumDroppedFrames,
+                "presents": timing.m_nNumFramePresents,
+            }
+        finally:
+            openvr.shutdown()
+    except Exception as e:
+        log.warning(f"openvr 查询失败（SteamVR 未运行？）: {e}")
+        return None
+
+
+# ============================================================
 # PS VR2 设备检测
 # ============================================================
 class PSVR2Detector:
@@ -1396,6 +1459,26 @@ class PSVR2Panel:
                  fg=C["text_sub"], bg=C["card"]).pack(anchor="w", pady=(0, 6))
         self.usb_btn = btn(cusb, "🔌 运行 USB 诊断", self._usb_diagnose, "teal", 14)
         self.usb_btn.pack(anchor="w")
+
+        # 眼动链路
+        _, cchain = card(p, "👁 眼动链路")
+        tk.Label(cchain, text="头显 → Toolkit 驱动 → VRCFT → 眼动模块 → VRChat，一眼定位断点",
+                 font=("Microsoft YaHei", 8),
+                 fg=C["text_sub"], bg=C["card"]).pack(anchor="w", pady=(0, 4))
+        self.eye_chain_frame = tk.Frame(cchain, bg=C["card"])
+        self.eye_chain_frame.pack(fill="x")
+        self.eye_chain_btn = btn(cchain, "👁 检查眼动链路", self._run_eye_chain, "teal", 14)
+        self.eye_chain_btn.pack(anchor="w", pady=(4, 0))
+
+        # 设备电量与性能（SteamVR 运行时）
+        _, cvr = card(p, "🔋 设备电量 & 性能")
+        tk.Label(cvr, text="openvr 官方 API 实时读取（需 SteamVR 运行中）",
+                 font=("Microsoft YaHei", 8),
+                 fg=C["text_sub"], bg=C["card"]).pack(anchor="w", pady=(0, 4))
+        self.vr_perf_frame = tk.Frame(cvr, bg=C["card"])
+        self.vr_perf_frame.pack(fill="x")
+        self.vr_perf_btn = btn(cvr, "🔋 刷新设备状态", self._refresh_vr_perf, "accent", 14)
+        self.vr_perf_btn.pack(anchor="w", pady=(4, 0))
 
         # 功能状态
         _, feat_c = card(p, "📊 功能解锁状态")
@@ -1998,6 +2081,104 @@ class PSVR2Panel:
         log.info("USB 诊断完成:\n" + report)
         messagebox.showinfo("USB 诊断", report + "\n\n📋 报告已复制到剪贴板")
 
+    # ── 眼动链路 ────────────────────────────────────────
+    def _run_eye_chain(self):
+        """逐环节检查眼动数据链路：头显→Toolkit→VRCFT→模块→VRChat"""
+        self.eye_chain_btn.config(state="disabled")
+        self._render_eye_chain([("…", "检测中")])
+
+        def do_check():
+            steps = []
+            d = self.detector
+            d.detect_all()
+            steps.append(("✅" if d.connected else "❌",
+                          f"头显连接: {'已连接' if d.connected else '未检测到头显'}"))
+            tk = d.toolkit
+            steps.append(("✅" if tk.toolkit_active else "❌",
+                          f"Toolkit 驱动: {'已激活' if tk.toolkit_active else '未激活（眼动数据源头缺失）'}"))
+            vrcft = d.vrcft
+            steps.append(("✅" if vrcft.is_running else "❌",
+                          f"VRCFT 进程: {'运行中' if vrcft.is_running else '未运行'}"))
+            module = vrcft.get_module_status()
+            steps.append(("✅" if module else "❌",
+                          f"PSVR2 眼动模块: {module or '未部署'}"))
+            vrchat = _process_running("VRChat.exe")
+            osc = _osc_port_listening()
+            if vrchat and osc:
+                mark, txt = "✅", "VRChat: 运行中，OSC 端口 9000 正常"
+            elif vrchat:
+                mark, txt = "⚠️", "VRChat: 运行中但 OSC 9000 未监听（在 VRChat 内开启 OSC）"
+            else:
+                mark, txt = "ℹ️", "VRChat: 未运行（如需眼动用于 VRChat 请先启动）"
+            steps.append((mark, txt))
+            self.root.after(0, self._render_eye_chain, steps)
+        threading.Thread(target=do_check, daemon=True).start()
+
+    def _render_eye_chain(self, steps):
+        self.eye_chain_btn.config(state="normal")
+        for w in self.eye_chain_frame.winfo_children():
+            w.destroy()
+        color_map = {"✅": C["green"], "❌": C["red"], "⚠️": C["yellow"],
+                     "ℹ️": C["text_sub"], "…": C["text_sub"]}
+        for mark, text in steps:
+            row = tk.Frame(self.eye_chain_frame, bg=C["card"])
+            row.pack(fill="x", pady=1)
+            tk.Label(row, text=mark, font=("Microsoft YaHei", 10),
+                     bg=C["card"], fg=color_map.get(mark, C["text"])).pack(side="left")
+            tk.Label(row, text=text, font=("Microsoft YaHei", 9),
+                     bg=C["card"], fg=C["text"]).pack(side="left", padx=(6, 0))
+
+    # ── 设备电量 & 性能 ─────────────────────────────────
+    def _refresh_vr_perf(self):
+        self.vr_perf_btn.config(state="disabled")
+
+        def do_query():
+            data = _query_vr_devices()
+            self.root.after(0, self._render_vr_perf, data)
+        threading.Thread(target=do_query, daemon=True).start()
+
+    def _render_vr_perf(self, data: Optional[Dict]):
+        self.vr_perf_btn.config(state="normal")
+        for w in self.vr_perf_frame.winfo_children():
+            w.destroy()
+        if data is None:
+            tk.Label(self.vr_perf_frame, text="⚠ SteamVR 未运行（启动后可查看电量与帧统计）",
+                     font=("Microsoft YaHei", 9), fg=C["text_sub"],
+                     bg=C["card"]).pack(anchor="w")
+            return
+        for dev in data.get("devices", []):
+            row = tk.Frame(self.vr_perf_frame, bg=C["card"])
+            row.pack(fill="x", pady=1)
+            name = dev["name"][:24]
+            pct = int(dev["battery"] * 100) if dev["battery"] >= 0 else -1
+            batt_txt = f"{pct}%" if pct >= 0 else "N/A"
+            charge_txt = " ⚡充电中" if dev["charging"] else ""
+            if pct >= 0:
+                color = C["green"] if pct > 50 else \
+                    (C["yellow"] if pct > 20 else C["red"])
+            else:
+                color = C["text_sub"]
+            tk.Label(row, text="🔋", bg=C["card"]).pack(side="left")
+            tk.Label(row, text=f"{name}", font=("Microsoft YaHei", 9),
+                     bg=C["card"], fg=C["text"]).pack(side="left", padx=(6, 0))
+            tk.Label(row, text=f"{batt_txt}{charge_txt}",
+                     font=("Microsoft YaHei", 9, "bold"),
+                     bg=C["card"], fg=color).pack(side="right")
+        dropped = data.get("dropped", 0)
+        presents = data.get("presents", 0)
+        if presents > 0:
+            rate = dropped * 100.0 / presents
+            color = C["green"] if rate < 2 else (C["yellow"] if rate < 8 else C["red"])
+            tk.Label(self.vr_perf_frame,
+                     text=f"帧统计: 已呈现 {presents}，丢帧 {dropped}（{rate:.1f}%）",
+                     font=("Microsoft YaHei", 8), bg=C["card"],
+                     fg=color).pack(anchor="w", pady=(4, 0))
+            if rate >= 8:
+                tk.Label(self.vr_perf_frame,
+                         text="💡 丢帧较高：建议降低渲染缩放（SteamVR 设置区）或切换 72/60Hz",
+                         font=("Microsoft YaHei", 8), bg=C["card"],
+                         fg=C["yellow"]).pack(anchor="w")
+
     # ── 健康检查 ────────────────────────────────────────
     def _run_health_check(self):
         def diagnose():
@@ -2459,14 +2640,6 @@ class PSVR2Panel:
             self.root.after(0, lambda: messagebox.showwarning("未安装",
                 "VRCFaceTracking 未安装\n可点击「VRCFT (Steam)」安装"))
 
-    def _launch_all(self):
-        threading.Thread(target=self._do_launch_all, daemon=True).start()
-
-    def _do_launch_all(self):
-        self._do_launch_steamvr()
-        time.sleep(2)
-        self._do_launch_vrcft()
-
     def _prepare_and_launch(self):
         """一键准备并启动：检查驱动 → 拉起 VRCFT → 启动 SteamVR（全程无弹窗噪音）"""
         self.prepare_btn.config(state="disabled", text="准备中...")
@@ -2796,9 +2969,10 @@ class PSVR2Panel:
             f"{APP_NAME} v{APP_VERSION}\n\n"
             f"PlayStation VR2 PC 控制面板\n"
             f"深度集成 PSVR2Toolkit 工具链\n\n"
-            f"v4.11.0 更新：\n"
-            f"  🚀 一键准备并启动 / 🧰 SteamVR 急救\n"
-            f"  📦 预设完整档位 / 🔌 USB 连接诊断\n\n"
+            f"v4.12.0 更新：\n"
+            f"  👁 眼动链路可视化 / 🔋 设备电量与帧统计\n"
+            f"  🧹 死代码清理\n\n"
+            f"v4.11.0 更新：一键准备启动 / SteamVR 急救 / 预设完整档位 / USB 诊断\n"
             f"v4.10.0 更新：刷新率切换（120/90/72/60Hz）\n"
             f"v4.9.2 更新：单实例互斥锁 / 自启条目迁移\n"
             f"v4.9.1 更新：通知队列 / 持久化加固 / 单元测试\n"

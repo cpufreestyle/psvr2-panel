@@ -4,3 +4,4 @@
 # 可选依赖
 pystray>=0.19.5   # 系统托盘功能（最小化到托盘）
 Pillow>=12.3.0    # pystray 托盘图标依赖
+openvr>=2.12      # SteamVR 运行时读取设备电量与帧统计（SteamVR 未运行时自动降级）

@@ -1,4 +1,4 @@
-# PS VR2 PC 控制面板 v4.11.0
+# PS VR2 PC 控制面板 v4.12.0
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Python Version](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/downloads/)
@@ -38,13 +38,15 @@ PlayStation VR2 PC 管理工具，一键解锁 PS VR2 在 PC 上的隐藏功能�
 - ✅ **SteamVR 急救**（僵死进程清理 / 驱动注册检测 / 设置重置+自动备份）
 - ✅ **USB 连接诊断**（解析头显 USB 控制器与端口链路）
 - ✅ **配置预设完整档位**（渲染缩放 + 平滑 + 刷新率 + Toolkit 开关一键切换）
+- ✅ **眼动链路可视化**（头显→Toolkit→VRCFT→模块→VRChat 逐环节检查，一眼定位断点）
+- ✅ **设备电量 & 帧统计**（openvr 官方 API：头显/Sense 电量实时读取 + 丢帧率与超采样建议）
 - ✅ 可滚动画布（界面内容再多不被裁剪）
 
 ## 安装
 
 ### 🎯 推荐：直接下载 exe（无需 Python）
 
-前往 [GitHub Releases](https://github.com/cpufreestyle/psvr2-panel/releases) 下载最新版本的 `PSVR2-Panel-v4.11.0.exe`，双击即可运行。
+前往 [GitHub Releases](https://github.com/cpufreestyle/psvr2-panel/releases) 下载最新版本的 `PSVR2-Panel-v4.12.0.exe`，双击即可运行。
 
 ### 💻 从源码运行
 
@@ -66,6 +68,15 @@ python main.py
 - Windows 10/11 64位
 - Python 3.10+（Pillow 12 要求；exe 版无需 Python）
 - tkinter（Python 内置）
+
+## v4.12.0 更新
+
+| 类别 | 更新内容 |
+|------|---------|
+| 👁 链路 | 眼动链路可视化：逐环节检查 头显连接 → Toolkit 激活 → VRCFT 进程 → PSVR2 眼动模块 → VRChat 运行与 OSC 9000 端口，✅/❌/⚠️ 直观定位断点 |
+| 🔋 电量 | 设备电量 & 帧统计卡片：openvr 官方 API（Background 模式）实时读取头显/Sense 控制器电量与充电状态；Compositor 帧统计展示丢帧率，≥8% 时给出"降渲染缩放或切 72/60Hz"建议。SteamVR 未运行时自动降级提示 |
+| 🧹 清理 | 移除死代码 `_launch_all`/`_do_launch_all`（已被一键准备并启动替代） |
+| 📦 依赖 | 新增 `openvr>=2.12`（Valve 官方 Python 绑定，exe 已内置） |
 
 ## v4.11.0 更新
 
